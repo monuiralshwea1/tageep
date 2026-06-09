@@ -1,0 +1,164 @@
+=== كود التسجيل والمصادقة لتطبيق Tageep ===
+
+ملف الخلفية: apps/tageep/tageep/api.py
+--------------------------------------
+
+# دوال المصادقة في الـ backend
+
+# قراءة التوكن من الهيدر المخصص أو Authorization أو من body
+def _request_token():
+    # نحاول قراءة توكن Tageep من الهيدر المخصص أولاً.
+    tageep_token = frappe.get_request_header("X-Tageep-Token")
+    if tageep_token:
+        return tageep_token.strip()
+
+    # إذا لم يوجد الهيدر المخصص، نسمح أيضاً باستخدام Authorization Bearer.
+    header = frappe.get_request_header("Authorization") or ""
+    if header.lower().startswith("bearer "):
+        return header[7:].strip()
+
+    # كخيار أخير، نبحث في بيانات الطلب (body) عن access_token.
+    return _get_payload_value("access_token")
+
+# التحقق من التوكن وتحميل المستخدم الحالي
+def _current_tageep_user():
+    # نتحقق من صحة التوكن ونفك الشيفرة لنحصل على هوية المستخدم.
+    payload = _parse_token(_request_token())
+    if not payload:
+        frappe.local.response["http_status_code"] = 401
+        frappe.throw(_("Invalid or expired Tageep session"), frappe.AuthenticationError)
+
+    user_id = payload.get("user_id")
+    user = next((item for item in _get_state().get("users", []) if item.get("id") == user_id), None)
+    if not user:
+        frappe.local.response["http_status_code"] = 401
+        frappe.throw(_("Tageep user was not found"), frappe.AuthenticationError)
+
+    return user
+
+# تسجيل الدخول وكشف المستخدم
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def login(username=None, password=None):
+    # نحصل على اسم المستخدم وكلمة المرور من المعاملات أو من جسم الطلب.
+    username = (username or _get_payload_value("username") or "").strip()
+    password = password if password is not None else _get_payload_value("password", "")
+
+    if not username or password is None:
+        frappe.local.response["http_status_code"] = 400
+        frappe.throw(_("Username and password are required"), frappe.ValidationError)
+
+    state = _get_state()
+    users = state.get("users", [])
+    # إذا كانت جميع كلمات المرور فارغة، نسمح بتسجيل الدخول كـ admin بكلمة admin.
+    if _all_users_without_password(users) and username.lower() == "admin" and str(password) == "admin":
+        user = next(
+            (item for item in users if str(item.get("name", "")).strip().lower() == "admin"),
+            None,
+        )
+    else:
+        user = next(
+            (
+                item
+                for item in users
+                if str(item.get("name", "")).strip().lower() == username.lower()
+                and str(item.get("password", "")) == str(password)
+            ),
+            None,
+        )
+
+    if not user:
+        frappe.local.response["http_status_code"] = 401
+        frappe.throw(_("Invalid username or password"), frappe.AuthenticationError)
+
+    # إذا نجح التحقق، نعيد توكن JWT مبني على HMAC ومعلومات المستخدم العامة.
+    return {"access_token": _make_token(user.get("id")), "user": _public_user(user)}
+
+
+ملف الواجهة: apps/tageep/tageep/www/tageep.html
+---------------------------------------------
+
+<div id="loginScreen">
+    <div class="login-card">
+        <div class="login-header">
+            <div class="login-marquee">اذكر الله وصلى على النبي</div>
+            <h2>مرحبا بكم في نظام تعقيب الموظفين في الفروع</h2>
+        </div>
+        <div class="login-body">
+            <div class="form-control"><label>اسم المستخدم</label><input type="text" id="loginUsername" placeholder="ادخل اسم المستخدم"></div>
+            <div class="form-control"><label>كلمة المرور</label><input type="password" id="loginPassword" placeholder="ادخل كلمة المرور"></div>
+            <div class="form-control checkbox-control"><label><input type="checkbox" id="rememberPassword"> تذكّر كلمة المرور</label></div>
+            <div class="login-actions">
+                <button onclick="login()">تسجيل الدخول</button>
+                <button class="btn-warning" onclick="forgotPassword()">نسيت كلمة المرور</button>
+            </div>
+            <p id="loginMessage"></p>
+        </div>
+    </div>
+</div>
+
+
+ملف JavaScript: apps/tageep/tageep/public/js/tageep.js
+--------------------------------------------------
+
+// تعريف مسارات API الخاصة بتسجيل الدخول والمصادقة
+const API_METHOD_BASE = '/api/method/tageep.api';
+const API_ROUTES = {
+    state: `${API_METHOD_BASE}.get_state`,
+    saveState: `${API_METHOD_BASE}.save_state`,
+    licenseStatus: `${API_METHOD_BASE}.license_status`,
+    activateLicense: `${API_METHOD_BASE}.activate_license`,
+    login: `${API_METHOD_BASE}.login`
+};
+
+// بناء رؤوس الطلب مع توكن Tageep عند الحاجة
+function buildApiHeaders(options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (options.json !== false) headers['Content-Type'] = 'application/json';
+    const token = getAccessToken();
+    if (options.auth !== false && token) headers['X-Tageep-Token'] = token;
+    const csrfToken = getCsrfToken();
+    if (csrfToken && options.method && options.method !== 'GET') {
+        headers['X-Frappe-CSRF-Token'] = csrfToken;
+    }
+    return headers;
+}
+
+// تنفيذ طلب API
+async function apiRequest(url, options = {}) {
+    const response = await fetch(url, { ...options, headers: buildApiHeaders(options) });
+    return parseApiResponse(response);
+}
+
+// دالة تسجيل الدخول في الواجهة
+async function login() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const remember = document.getElementById('rememberPassword').checked;
+    if (!username || !password) return showLogin('يرجى إدخال اسم المستخدم وكلمة المرور');
+    try {
+        localStorage.removeItem('appAccessToken');
+        localStorage.removeItem('appCurrentUserId');
+        const result = await apiRequest(API_ROUTES.login, {
+            method: 'POST',
+            auth: false,
+            body: JSON.stringify({ username, password })
+        });
+        currentUser = result.user;
+        localStorage.setItem('appAccessToken', result.access_token);
+        localStorage.setItem('appCurrentUserId', currentUser.id);
+        localStorage.removeItem('appRememberUsername');
+        localStorage.removeItem('appRememberPassword');
+        localStorage.setItem('appRememberChecked', remember ? 'true' : 'false');
+        await loadRemoteState();
+        currentUser = db.users.find(user => user.id === result.user.id) || result.user;
+        showApp();
+    } catch (error) {
+        console.error('Login failed:', error);
+        localStorage.removeItem('appAccessToken');
+        localStorage.removeItem('appCurrentUserId');
+        const message = error.message === 'Failed to fetch'
+            ? 'تعذر الاتصال بخادم Frappe.'
+            : (error.message || 'تعذر تسجيل الدخول. تأكد من اسم المستخدم وكلمة المرور ثم حاول مرة أخرى.');
+        showLogin(message);
+    }
+}

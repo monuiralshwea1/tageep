@@ -2,7 +2,7 @@ app_name = "tageep"
 app_title = "Tageep Management"
 app_publisher = "moneer"
 app_description = "Tageep Management"
-app_email = "moneer@gmail.com"
+app_email = "M777682260@gmail.com"
 app_license = "mit"
 
 # Apps
@@ -11,15 +11,20 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "tageep",
-# 		"logo": "/assets/tageep/logo.png",
-# 		"title": "Tageep Management",
-# 		"route": "/tageep",
-# 		"has_permission": "tageep.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "tageep",
+		"logo": "/assets/tageep/logo.png",
+		"title": "Tageep Management",
+		"route": "/tageep",
+	}
+]
+
+website_route_rules = [
+	{"from_route": "/tageep", "to_route": "tageep"},
+	{"from_route": "/tageep/<path:app_path>", "to_route": "tageep"},
+]
+
 
 # Includes in <head>
 # ------------------
@@ -246,4 +251,3 @@ app_license = "mit"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

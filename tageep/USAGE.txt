@@ -1,0 +1,64 @@
+Tageep Management - وثيقة التشغيل
+
+1. ما هو مسار التطبيق في المتصفح؟
+
+- بعد تثبيت التطبيق على موقع Frappe، يصبح مسار التطبيق:
+  /tageep
+
+- إذا كان الموقع يعمل محليًا على المنفذ 8000، فالمسار الكامل يكون:
+  http://localhost:8000/tageep
+
+- إذا كان الموقع يعمل على سيرفر باسم الموقع example.com، فالمسار يكون:
+  https://example.com/tageep
+
+2. كيف يعمل التطبيق؟
+
+- الواجهة الأمامية للتطبيق موجودة في الملف:
+  apps/tageep/tageep/www/index.html
+
+- هذا يعني أن التطبيق يعرض صفحة ثابتة من داخل Frappe في المسار /tageep.
+
+- التطبيق يستخدم واجهة برمجة تطبيقات (API) من Frappe لحفظ واسترجاع البيانات.
+
+- نقاط النهاية الرئيسية هي:
+  - GET  /api/method/tageep.api.license_status
+  - POST /api/method/tageep.api.activate_license
+  - POST /api/method/tageep.api.login
+  - GET  /api/method/tageep.api.get_state
+  - POST /api/method/tageep.api.save_state
+
+3. أين تُخزن البيانات؟
+
+- البيانات تُخزن في جدول قاعدة البيانات المسمى:
+  "Tageep App State"
+
+- عند التثبيت لأول مرة، يتم إنشاء هذا الجدول تلقائيًا من خلال الكود في
+  apps/tageep/tageep/api.py
+
+4. ماذا تحتاج حتى يعمل التطبيق على أي سيرفر؟
+
+- أن يكون لديك بيئة Frappe/BENCH صالحة.
+- تثبيت التطبيق في الموقع باستخدام:
+    bench --site <site-name> install-app tageep
+
+- بعد التثبيت، شغل:
+    bench --site <site-name> migrate
+
+- تأكد من أن إعدادات الموقع تعمل، وأن قاعدة البيانات متاحة.
+
+- إذا نقلت التطبيق إلى سيرفر جديد:
+  1. انسخ مجلد التطبيق apps/tageep.
+  2. ثبت التطبيق داخل bench الجديد.
+  3. نفّذ الأمر install-app ثم migrate.
+
+5. ملاحظات مهمة
+
+- التطبيق يعتمد على ملف hooks.py لربط التطبيق بواجهة Frappe.
+- أضفت في hooks.py التعريف التالي:
+    add_to_apps_screen = [{"name": "tageep", "route": "/tageep"}]
+
+- هذا يضمن أن التطبيق يظهر كأيقونة في صفحة التطبيقات ويمكن فتحه عن طريق
+  الرابط /tageep.
+
+- إذا أردت فتح التطبيق من قائمة التطبيقات داخل الـ Desk، استخدم الرابط:
+  /tageep

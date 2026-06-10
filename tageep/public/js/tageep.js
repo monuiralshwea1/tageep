@@ -76,6 +76,192 @@ function stripHtml(value) {
     return String(value || '').replace(/<[^>]*>/g, '').trim();
 }
 
+// Helpers: normalize text, find employee, format employee label, and save DB
+function normalizeText(text) {
+    if (text === null || text === undefined) return '';
+    try {
+        // remove Arabic diacritics and normalize whitespace
+        return String(text)
+            .normalize('NFKD')
+            .replace(/[\u064B-\u0652]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    } catch (e) {
+        return String(text).trim().toLowerCase();
+    }
+}
+
+function findEmployeeById(id) {
+    if (!id) return null;
+    return (db.employees || []).find(e => e.id === id) || null;
+}
+
+function getEmployeeLabel(id) {
+    const emp = findEmployeeById(id);
+    if (!emp) return id || '';
+    return `${emp.name || ''}${emp.employeeNumber ? ' (' + emp.employeeNumber + ')' : ''}`;
+}
+
+function saveDB() {
+    try {
+        localStorage.setItem('tageep_state', JSON.stringify(db));
+    } catch (e) {
+        console.warn('saveDB: local save failed', e);
+    }
+    // Try to persist to remote in background; don't block UI
+    persistRemoteState().catch(err => { console.warn('saveDB: remote persist failed', err); });
+}
+
+// Count work days between two dates (inclusive), excluding configured weekly off days
+function countWorkDays(from, to) {
+    if (!from || !to) return 0;
+    const a = new Date(from); const b = new Date(to);
+    let count = 0;
+    const offDays = Array.isArray(db.settings.weeklyOffDays)
+        ? db.settings.weeklyOffDays.map(v => parseInt(v, 10))
+        : [parseInt(db.settings.weeklyOffDay || '5', 10)];
+    for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+        if (offDays.includes(d.getDay())) continue;
+        count++;
+    }
+    return count;
+}
+
+function getHolidaysBetween(from, to) {
+    if (!from || !to) return [];
+    return (db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date);
+}
+
+// Return array of working dates between two dates (inclusive), excluding weekly off days
+function getWorkingDatesBetween(from, to, limit = null) {
+    const dates = [];
+    if (!from || !to) return dates;
+    const a = new Date(from); const b = new Date(to);
+    const offDays = Array.isArray(db.settings.weeklyOffDays)
+        ? db.settings.weeklyOffDays.map(v => parseInt(v, 10))
+        : [parseInt(db.settings.weeklyOffDay || '5', 10)];
+    for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+        if (offDays.includes(d.getDay())) continue;
+        dates.push(d.toISOString().split('T')[0]);
+        if (limit && dates.length >= limit) break;
+    }
+    return dates;
+}
+
+function populateDailyPeriodOptions(empId) {
+    const emp = db.employees.find(e => e.id === empId);
+    const shift = emp ? db.workShifts.find(s => s.id === emp.shiftId) : null;
+    let periodEl = document.getElementById('dailyPeriod');
+    const existingValueEl = document.getElementById('dailyValue');
+    const container = document.getElementById('dailyPeriodContainer') || (existingValueEl ? existingValueEl.parentElement : null);
+    if (!periodEl) {
+        // create select
+        periodEl = document.createElement('select');
+        periodEl.id = 'dailyPeriod';
+        periodEl.style.minWidth = '120px';
+        if (container) {
+            // insert after existing value element if available
+            if (existingValueEl && existingValueEl.parentElement === container) {
+                container.insertBefore(periodEl, existingValueEl.nextSibling);
+            } else {
+                container.appendChild(periodEl);
+            }
+        } else {
+            // fallback: append to form
+            const form = document.querySelector('form') || document.body;
+            form.appendChild(periodEl);
+        }
+    }
+    // fill options
+    periodEl.innerHTML = '<option value="all">الكل</option>';
+    if (shift && Array.isArray(shift.periods) && shift.periods.length) {
+        shift.periods.forEach(p => { periodEl.innerHTML += `<option value="${p.id}">${p.name}</option>`; });
+        periodEl.disabled = false;
+    } else {
+        periodEl.disabled = true;
+    }
+    // hide legacy dailyValue input if present
+    if (existingValueEl) existingValueEl.style.display = 'none';
+}
+
+function getShiftPeriodIdsForEmployee(emp) {
+    if (!emp) return ['all'];
+    const shift = db.workShifts.find(s => s.id === emp.shiftId);
+    if (!shift || !Array.isArray(shift.periods) || shift.periods.length === 0) return ['all'];
+    return shift.periods.map(p => p.id);
+}
+
+function getPeriodsCountForEmployee(emp) {
+    return getShiftPeriodIdsForEmployee(emp).length || 1;
+}
+
+// return array of status per period for emp on given date
+function getDailyStatusArray(emp, date) {
+    const periodIds = getShiftPeriodIdsForEmployee(emp);
+    const N = periodIds.length;
+    const status = Array(N).fill('present');
+    // main absences override daily followups
+    const mainRec = (db.absences || []).find(a => a.empId === emp.id && a.date === date);
+    if (mainRec) {
+        const t = mainRec.type;
+        if (t === 'holiday_present') {
+            for (let i = 0; i < N; i++) status[i] = 'holiday_present';
+        } else {
+            for (let i = 0; i < N; i++) status[i] = t;
+        }
+        return status;
+    }
+    const entries = (db.dailyFollowUps || []).filter(x => x.empId === emp.id && x.date === date);
+    if (!entries.length) return status;
+    entries.forEach(entry => {
+        if (!entry.period || entry.period === 'all') {
+            for (let i = 0; i < N; i++) status[i] = entry.statusType;
+        } else {
+            const idx = periodIds.indexOf(entry.period);
+            if (idx !== -1) status[idx] = entry.statusType;
+        }
+    });
+    return status;
+}
+
+function getAbsenceTotalsForEmployee(emp, from, to) {
+    const workingDates = getWorkingDatesBetween(from, to);
+    let absenceDays = 0;
+    let annualDays = 0;
+    let holidayPresent = 0;
+    const holidaysSet = new Set((db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date));
+    workingDates.forEach(date => {
+        const mainRec = (db.absences || []).find(a => a.empId === emp.id && a.date === date);
+        if (holidaysSet.has(date)) {
+            if (mainRec) {
+                if (mainRec.type === 'absent') absenceDays += parseFloat(mainRec.value) || 0;
+                if (mainRec.type === 'annual') annualDays += parseFloat(mainRec.value) || 0;
+            } else {
+                // holiday and no main rec -> count as holiday present (extra day)
+                holidayPresent += 1;
+            }
+            return;
+        }
+        if (mainRec) {
+            if (mainRec.type === 'absent') absenceDays += parseFloat(mainRec.value) || 0;
+            if (mainRec.type === 'annual') annualDays += parseFloat(mainRec.value) || 0;
+            return;
+        }
+        // derive from daily followups per-period
+        const statusArr = getDailyStatusArray(emp, date);
+        const N = statusArr.length || 1;
+        let absentCount = 0; let annualCount = 0;
+        statusArr.forEach(s => {
+            if (s === 'absent') absentCount++;
+            if (s === 'annual') annualCount++;
+        });
+        absenceDays += absentCount / N;
+        annualDays += annualCount / N;
+    });
+    return { absenceDays, annualDays, holidayPresent };
+}
+
 function getApiErrorMessage(data, fallback) {
     if (data && data._server_messages) {
         try {
@@ -128,17 +314,26 @@ async function loadRemoteState() {
 }
 
 async function persistRemoteState() {
-    if (!backendAvailable || isSavingRemote) return;
+    if (isSavingRemote) return;
     isSavingRemote = true;
     try {
+        // Attempt to save to backend regardless of backendAvailable flag.
+        // If the call succeeds, mark backendAvailable=true and update local state from server.
         const state = await apiRequest(API_ROUTES.saveState, {
             method: 'POST',
             body: JSON.stringify({ state: db })
         });
         normalizeAppState(state);
+        backendAvailable = true;
+        console.info('State persisted to backend successfully.');
     } catch (error) {
-        console.error('API save failed:', error);
-        alert(`تعذر حفظ البيانات في قاعدة بيانات Frappe.\n${error.message || ''}`);
+        // keep backendAvailable false but don't prevent local usage
+        backendAvailable = false;
+        console.warn('API save failed:', error);
+        // only alert user if they are authenticated (i.e., token present)
+        if (getAccessToken()) {
+            alert(`تعذر حفظ البيانات في قاعدة بيانات Frappe.\n${error.message || ''}`);
+        }
     } finally {
         isSavingRemote = false;
     }
@@ -283,57 +478,67 @@ function switchMainPanel(panelId) {
     if (btn) btn.classList.add('active');
 }
 
-function saveDB() {
-    renderAll();
-    persistRemoteState();
-}
-
-// --- Absence helpers (handle leave balance adjustments) ---
-function findEmployeeById(id) {
-    return db.employees.find(e => e.id === id);
-}
-
-function normalizeText(value) {
-    return (value || '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-function getEmployeeLabel(empId) {
-    const emp = db.employees.find(e => e.id === empId);
-    return emp ? `${emp.employeeNumber ? emp.employeeNumber + ' - ' : ''}${emp.name}` : 'الموظف';
-}
-
-function removeAbsenceRecord(rec) {
-    if (!rec) return;
-    const emp = findEmployeeById(rec.empId);
-    if (rec.type === 'annual' && emp) {
-        emp.leaveBalance = parseFloat(emp.leaveBalance) + parseFloat(rec.value);
-    }
-    db.absences = db.absences.filter(a => a.id !== rec.id);
-}
-
-function addOrReplaceAbsenceRecord(newRec) {
-    const emp = findEmployeeById(newRec.empId);
-    // find existing by empId+date
-    const existing = db.absences.find(a => a.empId === newRec.empId && a.date === newRec.date);
-    if (existing) {
-        // if existing was annual, restore its leave
-        if (existing.type === 'annual' && emp) {
-            emp.leaveBalance = parseFloat(emp.leaveBalance) + parseFloat(existing.value);
+async function saveShiftPeriod() {
+    if (!canPerform('settings', 'edit') && !canPerform('settings', 'add')) return alert('ليس لديك صلاحية لحفظ الفترة');
+    const shiftId = document.getElementById('selectedShiftId').value;
+    const shift = db.workShifts.find(s => s.id === shiftId);
+    if (!shift) return alert('اختر دواماً أولاً');
+    const id = document.getElementById('periodEditId').value;
+    const name = document.getElementById('periodName').value.trim();
+    const start = document.getElementById('periodStart').value;
+    const end = document.getElementById('periodEnd').value;
+    if (!name || !start || !end) return alert('أكمل بيانات الفترة');
+    if (id) {
+        const period = shift.periods.find(p => p.id === id);
+        if (period) {
+            period.name = name;
+            period.startTime = start;
+            period.endTime = end;
         }
-        db.absences = db.absences.filter(a => !(a.empId === newRec.empId && a.date === newRec.date));
+    } else {
+        const newId = 'p' + Date.now();
+        shift.periods.push({ id: newId, name, startTime: start, endTime: end });
+        console.log('saveShiftPeriod: shiftId=', shiftId, 'newPeriodId=', newId);
     }
-    // apply newRec
-    if (newRec.type === 'annual' && emp) {
-        emp.leaveBalance = parseFloat(emp.leaveBalance) - parseFloat(newRec.value);
+    resetPeriodForm();
+    saveDB();
+    try {
+        await persistRemoteState();
+        if (backendAvailable) alert('تم حفظ الفترة في قاعدة البيانات');
+        else alert('تم حفظ الفترة محلياً فقط؛ تحقق من اتصال الباكند.');
+    } catch (e) {
+        console.warn('saveShiftPeriod: persistRemoteState error', e);
     }
-    db.absences.push(newRec);
+    renderShiftPeriods();
+    renderWorkShifts();
 }
+
+// function addOrReplaceAbsenceRecord(newRec) {
+//     const emp = findEmployeeById(newRec.empId);
+//     // find existing by empId+date
+//     const existing = db.absences.find(a => a.empId === newRec.empId && a.date === newRec.date);
+//     if (existing) {
+//         // if existing was annual, restore its leave
+//         if (existing.type === 'annual' && emp) {
+//             emp.leaveBalance = parseFloat(emp.leaveBalance) + parseFloat(existing.value);
+//         }
+//         db.absences = db.absences.filter(a => !(a.empId === newRec.empId && a.date === newRec.date));
+//     }
+//     // apply newRec
+//     if (newRec.type === 'annual' && emp) {
+//         emp.leaveBalance = parseFloat(emp.leaveBalance) - parseFloat(newRec.value);
+//     }
+//     db.absences.push(newRec);
+// }
 
 function renderAll() {
     // Apply Settings
     document.getElementById('displayCompanyName').innerText = db.settings.companyName;
     document.getElementById('settingsCompanyName').value = db.settings.companyName;
-    document.getElementById('settingsLogo').value = db.settings.logo;
+    // settingsLogo: support file picker (data URL) while keeping backing value for persistence
+    const settingsLogoEl = document.getElementById('settingsLogo');
+    if (settingsLogoEl) settingsLogoEl.value = db.settings.logo;
+    enhanceSettingsLogoInput();
     document.getElementById('settingsOperationalDayStart').value = db.settings.operationalDayStart || '06:00';
     const weeklyOffDays = Array.isArray(db.settings.weeklyOffDays)
         ? db.settings.weeklyOffDays
@@ -370,6 +575,11 @@ function renderAll() {
     }
 
     document.getElementById('dailyEmp').innerHTML = `<option value="">اختر موظفاً</option>` + db.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+    // populate period select when employee changes
+    const dailyEmpEl = document.getElementById('dailyEmp');
+    if (dailyEmpEl) {
+        dailyEmpEl.onchange = function () { populateDailyPeriodOptions(this.value); };
+    }
     document.getElementById('dailyFilterEmp').innerHTML = `<option value="all">الكل</option>` + db.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
     document.getElementById('extraEmp').innerHTML = `<option value="">اختر موظفاً</option>` + db.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
     document.getElementById('extraFilterEmp').innerHTML = `<option value="all">الكل</option>` + db.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
@@ -382,6 +592,7 @@ function renderAll() {
     if (reportShift) {
         reportShift.innerHTML = `<option value="all">الكل</option>` + db.workShifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
     }
+    renderReportPeriodFilter();
     // determine permissions early
     const isManager = currentUser.role !== 'admin';
 
@@ -515,6 +726,78 @@ function renderAll() {
     enableTableSorting();
 }
 
+function renderReportPeriodFilter() {
+    const reportShift = document.getElementById('reportShift');
+    const reportPeriod = document.getElementById('reportPeriod');
+    if (!reportPeriod) return;
+
+    const shiftId = reportShift?.value || 'all';
+    let periods = [];
+
+    if (shiftId && shiftId !== 'all') {
+        const shift = db.workShifts.find(s => s.id === shiftId);
+        periods = shift ? shift.periods : [];
+    } else {
+        const periodMap = {};
+        db.workShifts.forEach(shift => {
+            (shift.periods || []).forEach(period => {
+                periodMap[period.id] = period;
+            });
+        });
+        periods = Object.values(periodMap);
+    }
+
+    reportPeriod.innerHTML = '<option value="all">الكل</option>' + periods.map(period => `<option value="${period.id}">${period.name}</option>`).join('');
+}
+
+function refreshShiftDropdowns() {
+    const empShiftSelect = document.getElementById('empShift');
+    if (empShiftSelect) {
+        const shiftOptions = db.workShifts.length
+            ? db.workShifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('')
+            : '<option value="" disabled>لا يوجد دوامات</option>';
+        const placeholder = '<option value="" disabled selected>اختر الدوام</option>';
+        empShiftSelect.innerHTML = placeholder + shiftOptions;
+        empShiftSelect.disabled = db.workShifts.length === 0;
+    }
+
+    const reportShift = document.getElementById('reportShift');
+    if (reportShift) {
+        // Original: only populated reportShift innerHTML
+        // تم تعديل الشيفرة: بعد ملء قائمة الدوامات نربط حدث onchange ليحدث قائمة الفترات أولاً ثم يعيد عرض التقرير
+        reportShift.innerHTML = `<option value="all">الكل</option>` + db.workShifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        reportShift.onchange = function () { renderReportPeriodFilter(); renderReportTable(); };
+    }
+    // Ensure period dropdown (if موجود) يعطى حدث onchange لعرض التقرير عند تغييره
+    const reportPeriod = document.getElementById('reportPeriod');
+    if (reportPeriod) reportPeriod.onchange = renderReportTable;
+    renderReportPeriodFilter();
+
+    // MODIFIED: populate a selectable dropdown in Settings to choose the active shift
+    // (original code did not populate `selectedShiftSelect`; only supported selecting via table زر "تحديد")
+    const selectedShiftSelect = document.getElementById('selectedShiftSelect');
+    if (selectedShiftSelect) {
+        selectedShiftSelect.innerHTML = `<option value="">اختر دواماً</option>` + db.workShifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        // keep selection in sync with hidden selectedShiftId
+        const current = document.getElementById('selectedShiftId')?.value || '';
+        selectedShiftSelect.value = current || '';
+        selectedShiftSelect.onchange = function () {
+            if (this.value) selectShift(this.value);
+            else {
+                // clear selection
+                const idEl = document.getElementById('selectedShiftId');
+                if (idEl) idEl.value = '';
+                const nameEl = document.getElementById('selectedShiftName');
+                if (nameEl) nameEl.innerText = '';
+                const section = document.getElementById('shiftPeriodsSection');
+                if (section) section.style.display = 'none';
+                renderWorkShifts();
+                renderShiftPeriods();
+            }
+        };
+    }
+}
+
 function getSortableValue(text) {
     const value = (text || '').trim();
     const dateMatch = value.match(/\d{4}-\d{2}-\d{2}/);
@@ -575,15 +858,24 @@ window.enableTableSorting = function () {
 function renderReportTable() {
     const branchFilter = document.getElementById('reportBranch')?.value || 'all';
     const shiftFilter = document.getElementById('reportShift')?.value || 'all';
+    // تم إضافة قراءة فلتر الفترة (إذا وُجد) لربطه بتصفية التقارير
+    const periodFilter = document.getElementById('reportPeriod')?.value || 'all';
     const from = document.getElementById('reportFrom')?.value;
     const to = document.getElementById('reportTo')?.value;
     const tbody = document.getElementById('reportTableBody');
     if (!tbody) return;
 
+    // Original: filtered only by branch and shift
+    // Now: also filter by selected period if a period is chosen.
     let filteredEmployees = db.employees.filter(e => {
         const branchMatch = branchFilter === 'all' || e.branchId === branchFilter;
         const shiftMatch = shiftFilter === 'all' || e.shiftId === shiftFilter;
-        return branchMatch && shiftMatch;
+        if (!(branchMatch && shiftMatch)) return false;
+        if (periodFilter === 'all') return true;
+        // if a specific period is selected, include employee only if their assigned shift contains that period
+        const empShift = db.workShifts.find(s => s.id === e.shiftId);
+        if (!empShift) return false;
+        return (empShift.periods || []).some(p => p.id === periodFilter);
     });
 
     if (!filteredEmployees.length) {
@@ -597,11 +889,13 @@ function renderReportTable() {
         const empShift = db.workShifts.find(s => s.id === emp.shiftId);
         const shiftName = empShift?.name || '';
         const periodLabel = empShift?.periods?.[0]?.name || '';
-        const inRangeAbsences = db.absences.filter(a => a.empId === emp.id && (!from || a.date >= from) && (!to || a.date <= to));
-        const presentDays = Math.max(0, (from && to) ? Math.floor((new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24)) + 1 - inRangeAbsences.filter(a => a.type === 'absent' || a.type === 'annual').reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0) : 0);
-        const absentDays = inRangeAbsences.filter(a => a.type === 'absent').reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);
-        const annualDays = inRangeAbsences.filter(a => a.type === 'annual').reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);
-        const holidayDays = inRangeAbsences.filter(a => a.type === 'holiday_present').length;
+        const expectedDays = (from && to) ? getWorkingDatesBetween(from, to).length : 0;
+        const totals = getAbsenceTotalsForEmployee(emp, from, to);
+        const absentDays = totals.absenceDays || 0;
+        const annualDays = totals.annualDays || 0;
+        const holidaysPresent = totals.holidayPresent || 0;
+        const presentDays = Math.max(0, expectedDays - absentDays - annualDays + holidaysPresent);
+        const holidayDays = (db.absences || []).filter(a => a.empId === emp.id && a.type === 'holiday_present' && (!from || a.date >= from) && (!to || a.date <= to)).length;
         const extraAmount = db.dailyExtras.filter(x => x.empId === emp.id && (!from || x.date >= from) && (!to || x.date <= to)).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
         const netSalary = (presentDays * emp.wage) + extraAmount;
 
@@ -729,37 +1023,26 @@ function renderMainTable() {
         totalNetAll += netSalary;
         const branchName = db.branches.find(b => b.id === emp.branchId)?.name || '';
 
-        // build dynamic date cells
+        // build dynamic date cells (aggregate main absences + daily followups per-period)
         let dynCells = '';
         dynamicDates.forEach((d, idx) => {
             if (!d) { dynCells += '<td></td>'; return; }
-            const rec = db.absences.find(a => a.empId === emp.id && a.date === d);
-            const holiday = db.holidays.find(h => h.date === d);
-
-            if (rec) {
-                // if there's an explicit record, it overrides holiday default
-                if (rec.type === 'absent') {
-                    const val = parseFloat(rec.value);
-                    const disp = (val === 0.5) ? '0.5غ' : (val === 1 ? '1غ' : (rec.value + 'غ'));
-                    dynCells += `<td class="state-absent">${disp}</td>`;
-                    // accumulate per-date totals
-                    dateAbsenceCounts[idx] += 1;
-                    dateTotals[idx] += parseFloat(rec.value) || 1;
-                } else if (rec.type === 'annual') {
-                    dynCells += `<td class="state-annual">1س</td>`;
-                    // count as an absence case for totals and add its value
-                    dateAbsenceCounts[idx] += 1;
-                    dateTotals[idx] += parseFloat(rec.value) || 1;
-                } else if (rec.type === 'holiday_present') {
-                    dynCells += `<td class="state-holiday">0م</td>`;
-                } else {
-                    dynCells += `<td class="state-present">0ح</td>`;
-                }
-            } else if (holiday) {
-                // no record but date is a configured holiday -> show holiday marker
+            const statusArr = getDailyStatusArray(emp, d);
+            const N = statusArr.length || 1;
+            // count types
+            let absentCount = 0; let annualCount = 0; let holidayCount = 0;
+            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'holiday_present') holidayCount++; });
+            const totalAbsenceVal = (absentCount + annualCount) / N; // days
+            if (holidayCount === N) {
                 dynCells += `<td class="state-holiday">0م</td>`;
+            } else if (annualCount > 0 && annualCount === N) {
+                dynCells += `<td class="state-annual">${annualCount === N ? '1س' : (annualCount / N) + 'س'}</td>`;
+                dateAbsenceCounts[idx] += annualCount; dateTotals[idx] += annualCount / N;
+            } else if (totalAbsenceVal > 0) {
+                const display = Number.isInteger(totalAbsenceVal) ? `${totalAbsenceVal}غ` : `${totalAbsenceVal.toFixed(1)}غ`;
+                dynCells += `<td class="state-absent">${display}</td>`;
+                dateAbsenceCounts[idx] += absentCount + annualCount; dateTotals[idx] += totalAbsenceVal;
             } else {
-                // default: present
                 dynCells += `<td class="state-present">0ح</td>`;
             }
         });
@@ -943,6 +1226,14 @@ function renderDailyFollowups() {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '' };
         const branchName = db.branches.find(b => b.id === item.branchId)?.name || '';
         const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
+        // period display
+        let periodLabel = 'الكل';
+        if (item.period && item.period !== 'all') {
+            const emp = db.employees.find(e => e.id === item.empId);
+            const shift = db.workShifts.find(s => s.id === (emp && emp.shiftId));
+            const p = shift?.periods?.find(pp => pp.id === item.period);
+            periodLabel = p?.name || item.period;
+        }
 
         tbody.innerHTML += `
                     <tr>
@@ -951,7 +1242,7 @@ function renderDailyFollowups() {
                         <td>${employee.name}</td>
                         <td>${branchName}</td>
                         <td>${statusLabel}</td>
-                        <td>${item.value}</td>
+                        <td>${periodLabel}</td>
                         <td>${item.notes || '-'}</td>
                         <td class="no-print">${canDelete ? `<button onclick="deleteDailyEntry('${item.id}')" class="btn-danger">حذف</button>` : ''}</td>
                     </tr>
@@ -966,14 +1257,28 @@ function saveDailyEntry() {
     const branchId = document.getElementById('dailyBranch').value;
     const date = document.getElementById('dailyDate').value;
     const statusType = document.getElementById('dailyStatus').value;
-    const value = parseFloat(document.getElementById('dailyValue').value) || 1;
+    const periodEl = document.getElementById('dailyPeriod');
+    const period = periodEl ? periodEl.value : 'all';
     const notes = document.getElementById('dailyNotes').value.trim();
     if (!empId || !branchId || !date) return alert('أكمل بيانات التعقيب اليومي');
     if (id && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لتعديل سجل التعقيب اليومي');
     if (!id && !canPerform('daily', 'add')) return alert('ليس لديك صلاحية لإضافة سجل التعقيب اليومي');
-    const duplicateDaily = db.dailyFollowUps.find(x => x.empId === empId && x.date === date && x.id !== id);
-    if (duplicateDaily) return alert(`يوجد تعقيب يومي مسجل مسبقاً للموظف ${getEmployeeLabel(empId)} في تاريخ ${date}. لا يمكن إضافة تعقيب آخر لنفس الموظف في نفس التاريخ.`);
-    const entry = { id: id || 'd' + Date.now(), empId, branchId, date, statusType, value, notes, createdAt: new Date().toISOString() };
+    const duplicateDaily = db.dailyFollowUps.find(x => x.empId === empId && x.date === date && x.period === period && x.id !== id);
+    if (duplicateDaily) return alert(`يوجد تعقيب لنفس الموظف، نفس التاريخ ونفس الفترة مسبقاً.`);
+    const entry = { id: id || 'd' + Date.now(), empId, branchId, date, statusType, period, notes, createdAt: new Date().toISOString() };
+    // adjust leave balance for annual entries: if editing, restore previous then apply new
+    const empObj = findEmployeeById(empId);
+    if (id) {
+        const existing = db.dailyFollowUps.find(x => x.id === id);
+        if (existing && existing.statusType === 'annual' && empObj) {
+            const restore = (existing.period === 'all') ? 1 : (1 / getPeriodsCountForEmployee(empObj));
+            empObj.leaveBalance = parseFloat(empObj.leaveBalance || 0) + restore;
+        }
+    }
+    if (entry.statusType === 'annual' && empObj) {
+        const deduct = (entry.period === 'all') ? 1 : (1 / getPeriodsCountForEmployee(empObj));
+        empObj.leaveBalance = parseFloat(empObj.leaveBalance || 0) - deduct;
+    }
     if (id) {
         const idx = db.dailyFollowUps.findIndex(x => x.id === id);
         if (idx !== -1) db.dailyFollowUps[idx] = entry;
@@ -990,13 +1295,22 @@ function resetDailyForm() {
     document.getElementById('dailyEmp').value = '';
     document.getElementById('dailyDate').value = new Date().toISOString().split('T')[0];
     document.getElementById('dailyStatus').value = 'present';
-    document.getElementById('dailyValue').value = '1';
+    const periodEl = document.getElementById('dailyPeriod');
+    if (periodEl) periodEl.value = 'all';
     document.getElementById('dailyNotes').value = '';
 }
 
 function deleteDailyEntry(id) {
     if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف سجلات التعقيب اليومي');
     if (!confirm('هل تريد حذف هذا السجل؟')) return;
+    const entry = db.dailyFollowUps.find(x => x.id === id);
+    if (entry && entry.statusType === 'annual') {
+        const empObj = findEmployeeById(entry.empId);
+        if (empObj) {
+            const restore = (entry.period === 'all') ? 1 : (1 / getPeriodsCountForEmployee(empObj));
+            empObj.leaveBalance = parseFloat(empObj.leaveBalance || 0) + restore;
+        }
+    }
     db.dailyFollowUps = db.dailyFollowUps.filter(x => x.id !== id);
     saveDB();
 }
@@ -1026,7 +1340,10 @@ function transferDailyRecords() {
 
     records.forEach(item => {
         if (item.statusType === 'present') return;
-        const rec = { id: 'a' + Date.now() + Math.random().toString(36).slice(2), empId: item.empId, date: item.date, value: item.value, type: item.statusType };
+        const empObj = findEmployeeById(item.empId);
+        const periodsCount = getPeriodsCountForEmployee(empObj);
+        const value = (item.period === 'all' || !item.period) ? 1 : (1 / periodsCount);
+        const rec = { id: 'a' + Date.now() + Math.random().toString(36).slice(2), empId: item.empId, date: item.date, value: value, type: item.statusType };
         addOrReplaceAbsenceRecord(rec);
     });
 
@@ -1481,20 +1798,35 @@ function deleteHoliday(id) {
     saveDB();
 }
 
-function saveShift() {
+async function saveShift() {
     if (!canPerform('settings', 'edit') && !canPerform('settings', 'add')) return alert('ليس لديك صلاحية لحفظ الدوام');
     const id = document.getElementById('shiftEditId').value;
     const name = document.getElementById('shiftName').value.trim();
     if (!name) return alert('أكمل اسم الدوام');
+    let savedShiftId = id;
     if (id) {
         const shift = db.workShifts.find(s => s.id === id);
         if (shift) shift.name = name;
     } else {
-        db.workShifts.push({ id: 's' + Date.now(), name, periods: [] });
+        savedShiftId = 's' + Date.now();
+        db.workShifts.push({ id: savedShiftId, name, periods: [] });
     }
     resetShiftForm();
+    console.log('saveShift: savedShiftId=', savedShiftId, 'shiftCount=', db.workShifts.length);
     saveDB();
-    renderWorkShifts();
+    try {
+        await persistRemoteState();
+        if (backendAvailable) {
+            alert('تم حفظ الدوام في قاعدة البيانات');
+        } else {
+            alert('تم حفظ الدوام محلياً، ولكن لم يتم حفظه على الباكند. تحقق من الاتصال.');
+        }
+    } catch (e) {
+        console.warn('saveShift: persistRemoteState error', e);
+        alert('حدث خطأ أثناء محاولة الحفظ على الباكند.');
+    }
+    selectShift(savedShiftId);
+    refreshShiftDropdowns();
 }
 
 function resetShiftForm() {
@@ -1512,18 +1844,10 @@ function selectShift(id) {
     renderShiftPeriods();
 }
 
-function editShift(id) {
-    if (!canPerform('settings', 'edit')) return alert('ليس لديك صلاحية لتعديل الدوام');
-    const shift = db.workShifts.find(s => s.id === id);
-    if (!shift) return;
-    document.getElementById('shiftEditId').value = id;
-    document.getElementById('shiftName').value = shift.name;
-    selectShift(id);
-}
-
-function deleteShift(id) {
+async function deleteShift(id) {
     if (!canPerform('settings', 'delete')) return alert('ليس لديك صلاحية لحذف الدوام');
     if (!confirm('تأكيد حذف الدوام؟')) return;
+    console.log('deleteShift: id=', id);
     db.workShifts = db.workShifts.filter(s => s.id !== id);
     if (document.getElementById('selectedShiftId').value === id) {
         document.getElementById('selectedShiftId').value = '';
@@ -1532,14 +1856,21 @@ function deleteShift(id) {
         resetPeriodForm();
     }
     saveDB();
+    try {
+        await persistRemoteState();
+        if (backendAvailable) alert('تم حذف الدوام من قاعدة البيانات');
+        else alert('حُذف محلياً فقط؛ لم يتم حذف الدوام في الباكند بسبب مشكلة اتصال.');
+    } catch (e) {
+        console.warn('deleteShift: persistRemoteState error', e);
+    }
     renderWorkShifts();
 }
 
-function saveShiftPeriod() {
+async function saveShiftPeriod() {
     if (!canPerform('settings', 'edit') && !canPerform('settings', 'add')) return alert('ليس لديك صلاحية لحفظ الفترة');
     const shiftId = document.getElementById('selectedShiftId').value;
     const shift = db.workShifts.find(s => s.id === shiftId);
-    if (!shift) return alert('اختر دواماً أولاً');
+    if (!shift) return alert('اختر دواماً أولاً أو قم بإنشاء دوام جديد');
     const id = document.getElementById('periodEditId').value;
     const name = document.getElementById('periodName').value.trim();
     const start = document.getElementById('periodStart').value;
@@ -1553,10 +1884,20 @@ function saveShiftPeriod() {
             period.endTime = end;
         }
     } else {
-        shift.periods.push({ id: 'p' + Date.now(), name, startTime: start, endTime: end });
+        const newId = 'p' + Date.now();
+        shift.periods.push({ id: newId, name, startTime: start, endTime: end });
+        console.log('saveShiftPeriod: shiftId=', shiftId, 'newPeriodId=', newId);
     }
     resetPeriodForm();
     saveDB();
+    // MODIFIED: attempt to persist period changes to backend (original function did not persist here)
+    try {
+        await persistRemoteState();
+        if (backendAvailable) alert('تم حفظ الفترة في قاعدة البيانات');
+        else alert('تم حفظ الفترة محلياً فقط؛ تحقق من اتصال الباكند.');
+    } catch (e) {
+        console.warn('saveShiftPeriod: persistRemoteState error', e);
+    }
     renderShiftPeriods();
     renderWorkShifts();
 }
@@ -1585,8 +1926,9 @@ function deleteShiftPeriod(id) {
     if (!canPerform('settings', 'delete')) return alert('ليس لديك صلاحية لحذف الفترة');
     const shiftId = document.getElementById('selectedShiftId').value;
     const shift = db.workShifts.find(s => s.id === shiftId);
-    if (!shift) return;
+    if (!shift) return alert('اختر دواماً أولاً');
     if (!confirm('تأكيد حذف الفترة؟')) return;
+    console.log('deleteShiftPeriod: shiftId=', shiftId, 'periodId=', id);
     shift.periods = shift.periods.filter(p => p.id !== id);
     saveDB();
     renderShiftPeriods();
@@ -1656,6 +1998,70 @@ function saveSettings() {
     saveDB();
     document.getElementById('weeklyOffSaveMessage').style.display = 'block';
     setTimeout(() => { document.getElementById('weeklyOffSaveMessage').style.display = 'none'; }, 2000);
+}
+
+// Enhance settings logo input to support selecting an image file from device
+function enhanceSettingsLogoInput() {
+    const orig = document.getElementById('settingsLogo');
+    if (!orig) return;
+    // avoid duplicating enhancer
+    if (document.getElementById('settingsLogoFile')) return;
+
+    // hide original text input but keep it for persistence
+    orig.style.display = 'none';
+
+    // container to place file input and preview
+    const container = document.createElement('div');
+    container.id = 'settingsLogoContainer';
+    container.style.display = 'flex';
+    container.style.alignItems = 'center';
+    container.style.gap = '8px';
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.id = 'settingsLogoFile';
+
+    const preview = document.createElement('img');
+    preview.id = 'settingsLogoPreview';
+    preview.style.maxWidth = '120px';
+    preview.style.maxHeight = '40px';
+    preview.style.objectFit = 'contain';
+    preview.alt = 'معاينة الشعار';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.innerText = 'إزالة';
+    removeBtn.onclick = function () {
+        orig.value = '';
+        db.settings.logo = '';
+        preview.src = '';
+        fileInput.value = '';
+        document.getElementById('printLogo').src = '';
+    };
+
+    // set preview from current value (could be URL or data URL)
+    if (orig.value) preview.src = orig.value;
+
+    fileInput.addEventListener('change', function (e) {
+        const f = this.files && this.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = function (ev) {
+            const dataUrl = ev.target.result;
+            preview.src = dataUrl;
+            orig.value = dataUrl; // keep backing value for saveSettings
+            db.settings.logo = dataUrl;
+            document.getElementById('printLogo').src = dataUrl;
+        };
+        reader.readAsDataURL(f);
+    });
+
+    // insert container after original input
+    orig.parentNode.insertBefore(container, orig.nextSibling);
+    container.appendChild(fileInput);
+    container.appendChild(preview);
+    container.appendChild(removeBtn);
 }
 function switchTab(tabId) {
     const tab = document.getElementById(tabId);
@@ -1787,6 +2193,24 @@ async function bootApp() {
         showLogin();
     } catch (error) {
         console.error('API load failed:', error);
+        // إذا تعذر الاتصال بالباكند، نحاول تحميل الحالة المحفوظة محلياً كنسخة احتياطية
+        const local = localStorage.getItem('tageep_state');
+        if (local) {
+            try {
+                normalizeAppState(JSON.parse(local));
+                // إن لم توجد مستخدمين، أضف حساب مدير افتراضي لضمان ظهور عناصر التحكم
+                if (!Array.isArray(db.users) || db.users.length === 0) {
+                    db.users = [{ id: 'u_admin', name: 'مدير النظام', password: '', role: 'admin', branchId: 'all', allowedTabs: {}, tabPermissions: {} }];
+                }
+                // استعادة المستخدم الحالي إن وُجد
+                const savedUserId = localStorage.getItem('appCurrentUserId');
+                currentUser = db.users.find(u => u.id === savedUserId) || db.users[0] || null;
+                showApp();
+                return;
+            } catch (e) {
+                console.error('Failed to load local state fallback:', e);
+            }
+        }
         document.body.innerHTML = `
                         <div style="direction:rtl; font-family:Tahoma, sans-serif; max-width:720px; margin:60px auto; padding:24px; background:#fff; border:1px solid #ddd; border-radius:8px;">
                             <h2 style="color:#c0392b;">تعذر الاتصال بالباكند</h2>

@@ -156,8 +156,10 @@
                                 <option value="annual">إجازة سنوية</option>
                                 <option value="holiday_present">مناسبة</option>
                             </select></div>
-                        <div class="form-control"><label>القيمة</label><input type="number" id="dailyValue" value="1"
-                                min="0.5" step="0.5"></div>
+                        <div class="form-control" id="dailyPeriodContainer"><label>الفترة</label>
+                            <!-- legacy input preserved for compatibility; JS will hide it and insert select#dailyPeriod -->
+                            <input type="number" id="dailyValue" value="1" min="0.5" step="0.5">
+                        </div>
                         <div class="form-control"><label>ملاحظات</label><input type="text" id="dailyNotes"
                                 placeholder="مثال: دورة تدريبية"></div>
                         <button id="btnSaveDaily" onclick="saveDailyEntry()" style="margin-bottom:5px;">حفظ التعقيب
@@ -196,7 +198,7 @@
                                     <th>اسم الموظف</th>
                                     <th>الفرع</th>
                                     <th>نوع الحالة</th>
-                                    <th>القيمة</th>
+                                    <th>الفترة</th>
                                     <th>الملاحظات</th>
                                     <th class="no-print">إجراءات</th>
                                 </tr>
@@ -277,12 +279,14 @@
                     <div class="form-control"><label>اسم الموظف</label><input type="text" id="empName"></div>
                     <div class="form-control"><label>تاريخ التعيين/الإضافة</label><input type="date" id="empDate"></div>
                     <div style="display:flex; gap:15px; flex-wrap:wrap; width:100%;">
-                        <div class="form-control" style="flex:1; min-width:180px;"><label>الفرع</label><select
-                                id="empBranch"></select></div>
-                        <div class="form-control" style="flex:1; min-width:180px;"><label>رصيد الإجازات</label><input
-                                type="number" id="empLeave" value="30"></div>
-                        <div class="form-control" style="flex:1; min-width:180px;"><label>الأجر اليومي</label><input
-                                type="number" id="empWage"></div>
+                    <div class="form-control" style="flex:1; min-width:180px;"><label>الفرع</label><select
+                        id="empBranch"></select></div>
+                    <!-- MODIFIED: إضافة حقل اختيار الدوام للموظف (لم يكن موجوداً في الكود الأصلي) -->
+                    <div class="form-control" style="flex:1; min-width:180px;"><label>الدوام</label><select id="empShift"></select></div>
+                    <div class="form-control" style="flex:1; min-width:180px;"><label>رصيد الإجازات</label><input
+                        type="number" id="empLeave" value="30"></div>
+                    <div class="form-control" style="flex:1; min-width:180px;"><label>الأجر اليومي</label><input
+                        type="number" id="empWage"></input></div>
                     </div>
                     <button id="btnSaveEmp" onclick="saveEmployee()" style="margin-bottom: 5px;">حفظ الموظف</button>
                     <button onclick="resetEmpForm()" class="btn-warning" style="margin-bottom: 5px;">إلغاء</button>
@@ -303,6 +307,7 @@
                                 <th>الفرع</th>
                                 <th>الأجر</th>
                                 <th>الرصيد</th>
+                                <th>الدوام</th>
                                 <th>إجراءات</th>
                             </tr>
                         </thead>
@@ -462,8 +467,8 @@
                                 style="flex-direction: column; align-items: flex-start; max-width: 400px;">
                                 <div class="form-control" style="width: 100%;"><label>اسم الشركة</label><input
                                         type="text" id="settingsCompanyName"></div>
-                                <div class="form-control" style="width: 100%;"><label>رابط صورة رأس الصفحة</label><input
-                                        type="text" id="settingsLogo"></div>
+                                <div class="form-control" style="width: 100%;"><label>شعار رأس الصفحة (اختيار ملف)</label><input
+                                    type="text" id="settingsLogo"></div>
                                 <div class="form-control" style="width: 100%;"><label>أيام العطلة الأسبوعية (اختر أكثر
                                         من
                                         يوم)</label>
@@ -531,6 +536,11 @@
                                 <input type="hidden" id="selectedShiftId">
                                 <div class="form-control" style="width:100%;"><label>اسم الدوام</label><input
                                         type="text" id="shiftName" placeholder="مثال: دوام صباحي"></div>
+                                <!-- MODIFIED: إضافة قائمة اختيار الدوام لتسهيل تحديد الدوام قبل إضافة الفترات
+                                     (الأصل: لم يكن هناك حقل اختيار مباشر؛ كان المستخدم يضغط على زر "تحديد" في الجدول) -->
+                                <div class="form-control" style="width:100%;"><label>اختر دوام لتعديل فتراته</label>
+                                    <select id="selectedShiftSelect"><option value="">اختر دواما</option></select>
+                                </div>
                                 <div style="display:flex; gap:10px; margin-top:8px;"><button id="btnSaveShift"
                                         onclick="saveShift()">حفظ الدوام</button><button class="btn-warning"
                                         onclick="resetShiftForm()">إلغاء</button></div>

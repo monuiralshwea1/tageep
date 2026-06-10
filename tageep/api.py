@@ -47,6 +47,8 @@ def _default_tab_permissions():
 
 
 def default_state():
+	# MODIFIED: Originally `workShifts` was not part of the persisted state here.
+	# Added `workShifts` so shifts and their periods are saved/loaded via the API like other lists.
 	return {
 		"settings": {"companyName": "الشركة", "logo": "", "weeklyOffDays": ["5"]},
 		"branches": [{"id": "b1", "branchNumber": "1", "name": "المركز الرئيسي", "address": ""}],
@@ -62,6 +64,7 @@ def default_state():
 			}
 		],
 		"employees": [],
+		"workShifts": [],
 		"absences": [],
 		"dailyFollowUps": [],
 		"dailyExtras": [],
@@ -159,10 +162,12 @@ def _normalize_state(state):
 	clean["branches"] = clean.get("branches") or default_state()["branches"]
 	clean["users"] = _restore_admin_password_if_all_empty(clean.get("users") or default_state()["users"])
 
+	# Ensure lists exist. Added `workShifts` so saved state will accept and normalize it.
 	for list_key in (
 		"branches",
 		"users",
 		"employees",
+		"workShifts",
 		"absences",
 		"dailyFollowUps",
 		"dailyExtras",

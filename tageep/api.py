@@ -204,7 +204,111 @@ def _save_state(state):
 		(json.dumps(state, ensure_ascii=False), now_datetime(), STATE_NAME),
 	)
 	frappe.db.commit()
+	# بعد حفظ الحالة كـ JSON، نزامن قوائم الموظفين والنوبات إلى جداول منفصلة في قاعدة فرابي
+	try:
+		_sync_state_to_tables(state)
+	except Exception:
+		frappe.logger().error("Tageep: Failed to sync state to tables", exc_info=True)
 	return state
+
+
+def ensure_employees_table():
+	if frappe.db.table_exists("Tageep Employee", cached=False):
+		return
+
+	frappe.db.multisql(
+		{
+			"mariadb": """
+				CREATE TABLE IF NOT EXISTS `tabTageep Employee` (
+					`name` varchar(140) NOT NULL,
+					`employee_json` longtext NOT NULL,
+					`modified` datetime(6) DEFAULT NULL,
+					PRIMARY KEY (`name`)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+			""",
+			"postgres": """
+				CREATE TABLE IF NOT EXISTS "tabTageep Employee" (
+					"name" varchar(140) PRIMARY KEY,
+					"employee_json" text NOT NULL,
+					"modified" timestamp
+				)
+			""",
+		}
+	)
+
+
+def ensure_workshifts_table():
+	if frappe.db.table_exists("Tageep Work Shift", cached=False):
+		return
+
+	frappe.db.multisql(
+		{
+			"mariadb": """
+				CREATE TABLE IF NOT EXISTS `tabTageep Work Shift` (
+					`name` varchar(140) NOT NULL,
+					`shift_json` longtext NOT NULL,
+					`modified` datetime(6) DEFAULT NULL,
+					PRIMARY KEY (`name`)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+			""",
+			"postgres": """
+				CREATE TABLE IF NOT EXISTS "tabTageep Work Shift" (
+					"name" varchar(140) PRIMARY KEY,
+					"shift_json" text NOT NULL,
+					"modified" timestamp
+				)
+			""",
+		}
+	)
+
+
+def _sync_employees(state):
+	ensure_employees_table()
+	ems = state.get("employees") or []
+	for emp in emps:
+		# استخدم الحقل id كـ اسم الصف، أو اسم إذا لم يوجد
+		ename = (emp.get("id") or emp.get("name") or secrets.token_urlsafe(8)).strip()
+		emp_json = json.dumps(emp, ensure_ascii=False)
+		now = now_datetime()
+		# ادراج أو تحديث
+		mariadb_sql = (
+			"INSERT INTO `tabTageep Employee` (name, employee_json, modified) VALUES (%s, %s, %s) "
+			"ON DUPLICATE KEY UPDATE employee_json=%s, modified=%s"
+		)
+		postgres_sql = (
+			"INSERT INTO \"tabTageep Employee\" (name, employee_json, modified) VALUES (%s, %s, %s) "
+			"ON CONFLICT (name) DO UPDATE SET employee_json = EXCLUDED.employee_json, modified = EXCLUDED.modified"
+		)
+		params = (ename, emp_json, now, emp_json, now)
+		frappe.db.multisql({"mariadb": mariadb_sql, "postgres": postgres_sql}, params)
+
+
+def _sync_workshifts(state):
+	ensure_workshifts_table()
+	shifts = state.get("workShifts") or []
+	for shift in shifts:
+		# استخدم id أو اسم
+		name = (shift.get("id") or shift.get("name") or secrets.token_urlsafe(8)).strip()
+		shift_json = json.dumps(shift, ensure_ascii=False)
+		now = now_datetime()
+		mariadb_sql = (
+			"INSERT INTO `tabTageep Work Shift` (name, shift_json, modified) VALUES (%s, %s, %s) "
+			"ON DUPLICATE KEY UPDATE shift_json=%s, modified=%s"
+		)
+		postgres_sql = (
+			"INSERT INTO \"tabTageep Work Shift\" (name, shift_json, modified) VALUES (%s, %s, %s) "
+			"ON CONFLICT (name) DO UPDATE SET shift_json = EXCLUDED.shift_json, modified = EXCLUDED.modified"
+		)
+		params = (name, shift_json, now, shift_json, now)
+		frappe.db.multisql({"mariadb": mariadb_sql, "postgres": postgres_sql}, params)
+
+
+def _sync_state_to_tables(state):
+	# تأكد من وجود الجداول ثم قم بالمزامنة
+	ensure_employees_table()
+	ensure_workshifts_table()
+	_sync_employees(state)
+	_sync_workshifts(state)
 
 
 def _request_json():

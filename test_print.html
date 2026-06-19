@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Print Header</title>
+    <style>
+        thead tr.print-header-row {
+            display: none;
+        }
+        @media print {
+            thead tr.print-header-row {
+                display: table-row !important;
+            }
+            thead {
+                display: table-header-group !important;
+            }
+            table {
+                border: 2px solid black;
+            }
+            th, td {
+                border: 1px solid black;
+                padding: 6px;
+            }
+            button { display: none !important; }
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Page - Print Header</h1>
+    <button onclick="testPrint()">🖨️ طباعة</button>
+    <button onclick="testPrintCSS()">🖨️ طباعة (مع CSS كلاس)</button>
+    
+    <table id="testTable">
+        <thead>
+            <tr>
+                <th>الاسم</th>
+                <th>القيمة</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>أحمد</td><td>100</td></tr>
+            <tr><td>محمد</td><td>200</td></tr>
+        </tbody>
+    </table>
+
+    <script>
+        function testPrint() {
+            const thead = document.querySelector('thead');
+            // إزالة أي صف قديم
+            const oldRow = thead.querySelector('tr.print-header-row');
+            if (oldRow) oldRow.remove();
+
+            const headerRow = document.createElement('tr');
+            headerRow.className = 'print-header-row';
+            headerRow.style.cssText = 'display: none;';
+            headerRow.innerHTML = `
+                <td colspan="2" style="text-align:center; border:0; padding:10px;">
+                    <div style="font-size:24px; font-weight:bold; margin:10px 0 4px;">شركة الاختبار</div>
+                    <div style="font-size:18px; font-weight:bold; margin:4px 0;">كشف تعقيب الموظفين</div>
+                    <div style="font-size:14px; color:#666; margin-bottom:10px;">الفترة من: 2026-06-01 إلى: 2026-06-18</div>
+                </td>
+            `;
+            thead.prepend(headerRow);
+            console.log('تم إضافة الصف, عدد الصفوف في thead:', thead.rows.length);
+            console.log('الصف المضاف:', headerRow.outerHTML);
+            
+            setTimeout(() => {
+                window.print();
+                setTimeout(() => {
+                    const r = thead.querySelector('tr.print-header-row');
+                    if (r) r.remove();
+                }, 500);
+            }, 100);
+        }
+
+        function testPrintCSS() {
+            const thead = document.querySelector('thead');
+            const oldRow = thead.querySelector('tr.print-header-row');
+            if (oldRow) oldRow.remove();
+
+            const headerRow = document.createElement('tr');
+            headerRow.className = 'print-header-row';
+            headerRow.innerHTML = `
+                <td colspan="2" style="text-align:center; border:0; padding:10px;">
+                    <div style="font-size:24px; font-weight:bold; margin:10px 0 4px;">شركة الاختبار</div>
+                    <div style="font-size:18px; font-weight:bold; margin:4px 0;">كشف تعقيب الموظفين</div>
+                    <div style="font-size:14px; color:#666; margin-bottom:10px;">الفترة من: 2026-06-01 إلى: 2026-06-18</div>
+                </td>
+            `;
+            thead.prepend(headerRow);
+            console.log('تم إضافة الصف بدون inline style');
+            
+            setTimeout(() => {
+                window.print();
+                setTimeout(() => {
+                    const r = thead.querySelector('tr.print-header-row');
+                    if (r) r.remove();
+                }, 500);
+            }, 100);
+        }
+    </script>
+</body>
+</html>

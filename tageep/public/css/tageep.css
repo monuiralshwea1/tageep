@@ -271,6 +271,11 @@ table thead th {
     z-index: 3;
 }
 
+/* === تعديل: إخفاء صف الشعار في الشاشة العادية، يظهر فقط عند الطباعة === */
+thead tr.print-header-row {
+    display: none;
+}
+
 /* Print Styles */
 @media print {
     body {
@@ -312,14 +317,27 @@ table thead th {
         display: none !important;
     }
 
+    /* === تعديل: إخفاء printHeader الأصلي (لم يعد مستخدماً في الطباعة) === */
+    /* الكود الأصلي: كان يظهر printHeader خارج الجدول */
     #printHeader {
-        display: block !important;
-        text-align: center;
-        margin-bottom: 20px;
+        display: none !important;
     }
 
-    #printHeader img {
-        max-height: 80px;
+    /* === تعديل: إظهار صف الشعار (print-header-row) عند الطباعة فقط === */
+    /* الصف مخفي في الشاشة (display:none) ويظهر هنا عند الطباعة */
+    thead tr.print-header-row {
+        display: table-row !important;
+    }
+    /* جعل حاوية الشعار والصور بعرض كامل عند الطباعة */
+    thead tr.print-header-row td {
+        border: none !important;
+        padding: 10px 0 !important;
+    }
+    thead tr.print-header-row td img {
+        width: 100% !important;
+        height: auto !important;
+        max-height: none !important;
+        object-fit: fill !important;
     }
 
     table {
@@ -331,10 +349,59 @@ table thead th {
         border: 1px solid black;
         padding: 6px;
     }
+
+    /* Ensure full table prints (not clipped by scrolling containers) */
+    .table-wrapper {
+        overflow: visible !important;
+        max-height: none !important;
+        height: auto !important;
+    }
+
+    /* Repeat the table header on each printed page */
+    thead {
+        display: table-header-group !important;
+    }
+
+    /* === تعديل: ضمان أن صف الشعار الممتد (print-header-row) يتكرر في كل صفحة === */
+    thead tr.print-header-row {
+        display: table-row;
+    }
+
+    /* Disable sticky positioning for print so header repeats normally */
+    table thead th {
+        position: static !important;
+        top: auto !important;
+        z-index: 3;
+    }
+
+    /* Avoid breaking rows across pages when possible */
+    tr, td {
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+}
+
+/* Print helper: hide everything except the print area when printing */
+#tageepPrintArea { display: none; }
+@media print {
+    body.printing > * { display: none !important; }
+    #tageepPrintArea { display: block !important; width: 100%; }
+    #tageepPrintArea table { width: 100%; border-collapse: collapse; }
+    /* === تعديل: جعل الشعار داخل thead بعرض كامل عند الطباعة === */
+    #tageepPrintArea .print-header-row td div:first-child {
+        width: 100%;
+    }
+    #tageepPrintArea .print-header-row td img {
+        width: 100% !important;
+        max-height: 150px;
+        object-fit: contain;
+    }
 }
 
 #printHeader {
     display: none;
+    max-width: 100%;
+
 }
 
 #licenseScreen,
@@ -415,4 +482,39 @@ table thead th {
 
 #appRoot {
     display: none;
+}
+
+/* CSS للقوائم القابلة للبحث (Searchable Select) */
+.searchable-select-input {
+    cursor: pointer;
+    background: #fff;
+}
+.searchable-select-input:focus {
+    outline: none;
+    border-color: #27ae60 !important;
+    box-shadow: 0 0 4px rgba(39, 174, 96, 0.3);
+}
+.searchable-select-item:first-child {
+    border-radius: 0 0 4px 4px;
+}
+.searchable-select-item:hover {
+    background: #e8f0fe !important;
+}
+.searchable-select-item.selected {
+    background: #dcedc8 !important;
+    font-weight: bold;
+}
+
+/* تحسين الطباعة - خطوط واضحة */
+@media print {
+    body {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    table {
+        font-size: 10pt !important;
+    }
+    th, td {
+        padding: 4pt 5pt !important;
+    }
 }

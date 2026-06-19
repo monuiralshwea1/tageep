@@ -73,12 +73,20 @@
         </div>
 
         <div class="content">
-            <div id="printHeader">
+            <!-- === تعديل: تم نقل الشعار والعنوان داخل thead الجدول نفسه عند الطباعة (راجع printVisibleTable في tageep.js) === -->
+            <!-- الكود الأصلي: كان printHeader عنصراً منفصلاً خارج الجدول، مما يمنع تكراره في الصفحات اللاحقة أثناء الطباعة -->
+            <!-- <div id="printHeader"> -->
+            <!--     <img id="printLogo" src="" alt="شعار الشركة"> -->
+            <!--     <h2 id="printTitle">كشف تعقيب الموظفين</h2> -->
+            <!--     <p id="printDateRange"></p> -->
+            <!-- </div> -->
+
+            <!-- حافظنا على العناصر المخفية للإسناد (backward compatibility): -->
+            <div id="printHeader" style="display:none;">
                 <img id="printLogo" src="" alt="شعار الشركة">
                 <h2 id="printTitle">كشف تعقيب الموظفين</h2>
                 <p id="printDateRange"></p>
             </div>
-
             <div id="tab-main" class="tab-content active">
                 <div class="sub-tabs">
                     <button class="sub-tab-btn active" data-main-panel="attendance-panel"
@@ -108,8 +116,9 @@
                             <input type="date" id="filterTo" onchange="renderMainTable()">
                         </div>
                         <div style="display: flex; gap: 10px;">
-                            <button onclick="window.print()" style="background-color: var(--primary);">🖨️ طباعة
+                            <button onclick="printVisibleTable()" style="background-color: var(--primary);">🖨️ طباعة
                                 الجدول</button>
+                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️ معاينة الطباعة</button>
                             <button onclick="resetMainFilters()"
                                 style="background-color:#607d8b; margin-left:8px;">إعادة ضبط الفلاتر</button>
                         </div>
@@ -176,8 +185,10 @@
                         <div style="display: flex; gap: 10px;">
                             <button onclick="renderReportTable()" style="background-color: var(--primary);">عرض
                                 التقرير</button>
-                            <button onclick="window.print()" style="background-color:#607d8b; margin-left:8px;">🖨️
+                            <button onclick="printVisibleTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
                                 طباعة التقرير</button>
+                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️
+                                معاينة الطباعة</button>
                         </div>
                     </div>
                     <div class="table-wrapper">
@@ -535,6 +546,14 @@
                                         type="text" id="settingsCompanyName"></div>
                                 <div class="form-control" style="width: 100%;"><label>شعار رأس الصفحة (اختيار ملف)</label><input
                                     type="text" id="settingsLogo"></div>
+                                <div class="form-control" style="width: 100%;"><label>حجم ورق الطباعة</label>
+                                    <select id="settingsPaperSize">
+                                        <option value="A4">A4</option>
+                                        <option value="A5">A5</option>
+                                        <option value="Letter">Letter</option>
+                                        <option value="Legal">Legal</option>
+                                    </select>
+                                </div>
                                 <div class="form-control" style="width: 100%;"><label>أيام العطلة الأسبوعية (اختر أكثر
                                         من
                                         يوم)</label>
@@ -662,8 +681,114 @@
             </div>
         </div>
 
+        <!-- واجهة معاينة الطباعة -->
+        <div id="printPreviewModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>معاينة الطباعة</h3>
+                    <span class="close" onclick="closePrintPreview()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="print-preview-controls">
+                        <div class="form-control">
+                            <label>حجم الورق:</label>
+                            <select id="previewPaperSize" onchange="updatePrintPreview()">
+                                <option value="A4">A4</option>
+                                <option value="A5">A5</option>
+                                <option value="Letter">Letter</option>
+                                <option value="Legal">Legal</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>اتجاه الطباعة:</label>
+                            <select id="previewOrientation" onchange="updatePrintPreview()">
+                                <option value="portrait">عمودي</option>
+                                <option value="landscape">أفقي</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span id="pageCount">عدد الصفحات: 0</span>
+                        </div>
+                    </div>
+                    <div id="printPreviewContent" class="print-preview-content">
+                        <!-- سيتم تحميل محتوى المعاينة هنا -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="printFromPreview()" style="background-color: var(--primary);">طباعة</button>
+                    <button onclick="closePrintPreview()" class="btn-warning">إغلاق</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- css للمعاينة -->
+        <style>
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            overflow: auto;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow: auto;
+            direction: rtl;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 10px;
+        }
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+        }
+        .print-preview-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .print-preview-content {
+            border: 1px solid #ddd;
+            padding: 15px;
+            background: white;
+            min-height: 400px;
+            overflow: auto;
+        }
+        </style>
+        
         <!-- csrf_token -->
-        <script src="/assets/tageep/js/tageep.js?v=20260609-1"></script>
+        <script src="/assets/tageep/js/tageep.js?v=20260618-1"></script>
 </body>
 
 </html>

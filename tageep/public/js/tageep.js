@@ -1999,6 +1999,41 @@ function renderWorkShifts() {
     `).join('');
 }
 
+async function saveShiftPeriod() {
+    if (!canPerform('settings', 'edit') && !canPerform('settings', 'add')) return alert('ليس لديك صلاحية لحفظ الفترة');
+    const shiftId = document.getElementById('selectedShiftId').value;
+    const shift = db.workShifts.find(s => s.id === shiftId);
+    if (!shift) return alert('اختر دواماً أولاً أو قم بإنشاء دوام جديد');
+    const id = document.getElementById('periodEditId').value;
+    const name = document.getElementById('periodName').value.trim();
+    const start = document.getElementById('periodStart').value;
+    const end = document.getElementById('periodEnd').value;
+    if (!name || !start || !end) return alert('أكمل بيانات الفترة');
+    if (id) {
+        const period = shift.periods.find(p => p.id === id);
+        if (period) {
+            period.name = name;
+            period.startTime = start;
+            period.endTime = end;
+        }
+    } else {
+        const newId = 'p' + Date.now();
+        shift.periods.push({ id: newId, name, startTime: start, endTime: end });
+        console.log('saveShiftPeriod: shiftId=', shiftId, 'newPeriodId=', newId);
+    }
+    resetPeriodForm();
+    saveDB();
+    try {
+        await persistRemoteState();
+        if (backendAvailable) alert('تم حفظ الفترة في قاعدة البيانات');
+        else alert('تم حفظ الفترة محلياً فقط؛ تحقق من اتصال الباكند.');
+    } catch (e) {
+        console.warn('saveShiftPeriod: persistRemoteState error', e);
+    }
+    renderShiftPeriods();
+    renderWorkShifts();
+}
+
 function renderShiftPeriods() {
     const shiftId = document.getElementById('selectedShiftId').value;
     const shift = db.workShifts.find(s => s.id === shiftId);
@@ -2692,8 +2727,133 @@ async function bootApp() {
     }
 }
 
+// ========== فرز الأعمدة في الجداول (تصاعدي / تنازلي) ==========
+// حالة الفرز العالمية
+const sortState = {};
+
+// دالة رئيسية لفرز جدول بناءً على عمود
+function sortTableData(table, colIndex) {
+    if (!table) return;
+    const tbl = table;
+    const tbody = tbl.querySelector('tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    // استبعاد صف المجموع إن وجد
+    let totalRow = null;
+    const lastRow = rows[rows.length - 1];
+    if (lastRow && lastRow.cells.length > 0 && lastRow.cells[0].textContent.trim() === 'المجموع') {
+        totalRow = rows.pop();
+    }
+    if (rows.length <= 1) return;
+
+    // مفتاح الحالة
+    const stateKey = tbl.id || ('table_' + Math.random().toString(36).slice(2, 8));
+    if (!tbl._sortKey) tbl._sortKey = stateKey;
+    if (!sortState[stateKey]) sortState[stateKey] = {};
+    const currentDir = sortState[stateKey][colIndex] || 'none';
+    const newDir = currentDir === 'asc' ? 'desc' : 'asc';
+    sortState[stateKey][colIndex] = newDir;
+
+    // فرز الصفوف
+    rows.sort((a, b) => {
+        const aText = (a.cells[colIndex]?.textContent || '').trim();
+        const bText = (b.cells[colIndex]?.textContent || '').trim();
+        // محاولة المقارنة كأرقام
+        const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
+        const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
+        let result;
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            result = aNum - bNum;
+        } else {
+            result = aText.localeCompare(bText, 'ar');
+        }
+        return newDir === 'asc' ? result : -result;
+    });
+
+    // إعادة بناء tbody
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+    if (totalRow) tbody.appendChild(totalRow);
+
+    // تحديث أيقونات رأس الجدول
+    const headerCells = tbl.querySelectorAll('thead th, thead td');
+    headerCells.forEach((cell, idx) => {
+        cell.classList.remove('sort-asc', 'sort-desc');
+        if (idx === colIndex) {
+            cell.classList.add(newDir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
+// تفعيل الفرز على جميع جداول الصفحة
 function enableTableSorting() {
-    // no-op placeholder (optional)
+    const selectors = [
+        '#tab-main .table-wrapper table',
+        '#tab-employees .table-wrapper table', 
+        '#tab-branches .table-wrapper table',
+        '#tab-users table:not(.no-sort)',
+        '#tab-archive table',
+        '#settings-subtab-holidays table',
+        '#settings-subtab-shifts .table-wrapper table',
+        '#daily-followup-panel .table-wrapper table',
+        '#daily-extra-panel .table-wrapper table',
+        '#report-panel .table-wrapper table'
+    ];
+    selectors.forEach(selector => {
+        document.querySelectorAll(selector).forEach(table => {
+            makeTableSortable(table);
+        });
+    });
+}
+
+// جعل جدول معين قابلاً للفرز
+function makeTableSortable(table) {
+    if (!table || table.dataset.sortable === 'true') return;
+    table.dataset.sortable = 'true';
+    
+    const headers = table.querySelectorAll('thead th, thead td');
+    headers.forEach((header, idx) => {
+        if (header.classList.contains('no-print')) return;
+        if (header.classList.contains('dyn-date')) return;
+        
+        header.style.cursor = 'pointer';
+        header.style.userSelect = 'none';
+        header.title = 'انقر للفرز';
+        
+        // إضافة سهم الفرز
+        if (!header.querySelector('.sort-arrow')) {
+            const arrow = document.createElement('span');
+            arrow.className = 'sort-arrow';
+            arrow.style.cssText = 'margin-right:4px;font-size:11px;color:#888;';
+            arrow.textContent = ' ⇅';
+            header.appendChild(arrow);
+        }
+        
+        // إزالة المستمع القديم وإضافة الجديد
+        if (header._sortHandler) {
+            header.removeEventListener('click', header._sortHandler);
+        }
+        header._sortHandler = function(e) {
+            e.stopPropagation();
+            // فرز الجدول
+            sortTableData(table, idx);
+            // تحديث الأسهم
+            headers.forEach((h, i) => {
+                const arrowSpan = h.querySelector('.sort-arrow');
+                if (arrowSpan) {
+                    if (i === idx) {
+                        const isAsc = h.classList.contains('sort-asc');
+                        arrowSpan.textContent = isAsc ? ' ↑' : ' ↓';
+                        arrowSpan.style.color = '#27ae60';
+                    } else {
+                        arrowSpan.textContent = ' ⇅';
+                        arrowSpan.style.color = '#888';
+                    }
+                }
+            });
+        };
+        header.addEventListener('click', header._sortHandler);
+    });
 }
 
 function wrapTablesWithScroll() {

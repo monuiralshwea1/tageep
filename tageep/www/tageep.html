@@ -59,6 +59,7 @@
             <button class="nav-btn" data-target="tab-daily" onclick="switchTab('tab-daily')">التعقيب اليومي</button>
             <button class="nav-btn" data-target="tab-archive" onclick="switchTab('tab-archive')">أرشفة التعقيب
                 المرحل</button>
+            <button class="nav-btn" data-target="tab-sent" onclick="switchTab('tab-sent')">التعقيب المرسل</button>
             <button class="nav-btn" data-target="tab-employees" onclick="switchTab('tab-employees')">الموظفين</button>
             <button class="nav-btn" data-target="tab-branches" onclick="switchTab('tab-branches')">الفروع</button>
             <button class="nav-btn" data-target="tab-users" onclick="switchTab('tab-users')">المستخدمين</button>
@@ -127,19 +128,15 @@
                     <div class="table-wrapper">
                         <table>
                             <thead>
-                                <tr>
+                                <tr id="mainTableHeaderRow">
                                     <th>رقم الموظف</th>
                                     <th>الاسم</th>
                                     <th>الفرع</th>
                                     <th>رصيد الإجازات</th>
                                     <th>الأيام المتوقعة</th>
-                                    <th class="dyn-date"></th>
-                                    <th class="dyn-date"></th>
-                                    <th class="dyn-date"></th>
-                                    <th class="dyn-date"></th>
-                                    <th class="dyn-date"></th>
-                                    <th class="dyn-date"></th>
+                                    <!-- الأعمدة الديناميكية (dyn-date) يتم إنشاؤها تلقائياً في renderMainTable() -->
                                     <th>أيام الغياب</th>
+                                    <th>إجازات مستنفذه</th>
                                     <th>الأيام الفعلية</th>
                                     <th>الأجر اليومي</th>
                                     <th>الإضافي</th>
@@ -175,39 +172,64 @@
                             </select>
                         </div>
                         <div class="form-control">
+                            <label>الشهر:</label>
+                            <select id="reportMonth" onchange="reportMonthChanged()">
+                                <option value="1">يناير</option>
+                                <option value="2">فبراير</option>
+                                <option value="3">مارس</option>
+                                <option value="4">أبريل</option>
+                                <option value="5">مايو</option>
+                                <option value="6">يونيو</option>
+                                <option value="7">يوليو</option>
+                                <option value="8">أغسطس</option>
+                                <option value="9">سبتمبر</option>
+                                <option value="10">أكتوبر</option>
+                                <option value="11">نوفمبر</option>
+                                <option value="12">ديسمبر</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>السنة:</label>
+                            <select id="reportYear" onchange="reportMonthChanged()">
+                            </select>
+                        </div>
+                        <div class="form-control">
                             <label>من تاريخ:</label>
-                            <input type="date" id="reportFrom" onchange="renderReportTable()">
+                            <input type="date" id="reportFrom" onchange="reportDateChanged()">
                         </div>
                         <div class="form-control">
                             <label>إلى تاريخ:</label>
-                            <input type="date" id="reportTo" onchange="renderReportTable()">
+                            <input type="date" id="reportTo" onchange="reportDateChanged()">
                         </div>
                         <div style="display: flex; gap: 10px;">
                             <button onclick="renderReportTable()" style="background-color: var(--primary);">عرض
                                 التقرير</button>
-                            <button onclick="printVisibleTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
+                            <button onclick="printReportTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
                                 طباعة التقرير</button>
-                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️
+                            <button onclick="previewReportTable()" style="background-color:#2ecc71; margin-left:8px;">👁️
                                 معاينة الطباعة</button>
                         </div>
                     </div>
                     <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>الرقم الوظيفي</th>
-                                    <th>الاسم</th>
-                                    <th>الفرع</th>
-                                    <th>نوع الدوام</th>
-                                    <th>الفترة</th>
-                                    <th>أيام الحضور</th>
-                                    <th>أيام الغياب</th>
-                                    <th>إجازات سنوية</th>
-                                    <th>المناسبات</th>
-                                    <th>الإضافي</th>
-                                    <th>المستحق</th>
-                                </tr>
-                            </thead>
+                            <table>
+                                <thead>
+                                    <tr id="reportTableHeaderRow">
+                                <th>الرقم الوظيفي</th>
+                                        <th>الاسم</th>
+                                        <th>الفرع</th>
+                                        <th>رصيد الإجازات</th>
+                                        <th>نوع الدوام</th>
+                                        <th>الفترة</th>
+                                        <!-- أعمدة التاريخ الديناميكية يتم إنشاؤها تلقائياً في renderReportTable() -->
+                                        <th>أيام الحضور</th>
+                                        <th>أيام الغياب</th>
+                                        <th>إجازات سنوية</th>
+                                        <th>الرصيد المتبقي</th>
+                                        <th>المناسبات</th>
+                                        <th>الإضافي</th>
+                                        <th>المستحق</th>
+                                    </tr>
+                                </thead>
                             <tbody id="reportTableBody"></tbody>
                         </table>
                     </div>
@@ -262,15 +284,16 @@
                                 onchange="renderDailyFollowups()"></div>
                         <div class="form-control"><label>إلى</label><input type="date" id="dailyFilterTo"
                                 onchange="renderDailyFollowups()"></div>
-                        <div style="display:flex; gap:10px;"><button onclick="transferDailyRecords()"
-                                class="btn-warning">ترحيل
-                                التعقيب</button></div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button onclick="sendDailyRecords()" class="btn-success" style="background-color:#2196F3; color:white;">📤 إرسال التعقيب</button>
+                            <button onclick="printDailyTable()" style="background-color: var(--primary);">🖨️ طباعة الجدول</button>
+                        </div>
                     </div>
                     <div class="table-wrapper">
                         <table>
                             <thead>
                                 <tr>
-                                    <th>اليوم / التاريخ</th>
+                            <th>اليوم / التاريخ</th>
                                     <th>رقم الموظف</th>
                                     <th>اسم الموظف</th>
                                     <th>الفرع</th>
@@ -310,7 +333,7 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th>التاريخ</th>
+                            <th>التاريخ</th>
                                     <th>رقم الموظف</th>
                                     <th>اسم الموظف</th>
                                     <th>الفرع</th>
@@ -348,6 +371,30 @@
                 </table>
             </div>
 
+            <div id="tab-sent" class="tab-content">
+                <div class="filters">
+                    <div class="form-control"><label>بحث فرع</label><select id="sentFilterBranch"
+                            onchange="renderSentReports()"></select></div>
+                    <div class="form-control"><label>بحث من</label><input type="date" id="sentFilterFrom"
+                            onchange="renderSentReports()"></div>
+                    <div class="form-control"><label>بحث إلى</label><input type="date" id="sentFilterTo"
+                            onchange="renderSentReports()"></div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الفرع</th>
+                            <th>تاريخ الإرسال</th>
+                            <th>عدد السجلات</th>
+                            <th>تاريخ الإنشاء</th>
+                            <th>الحالة</th>
+                            <th class="no-print">إجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sentTableBody"></tbody>
+                </table>
+            </div>
+
             <div id="tab-employees" class="tab-content">
                 <div class="form-group">
                     <input type="hidden" id="empEditId">
@@ -373,19 +420,24 @@
                             onchange="renderEmployees()">
                             <option value="all">الكل</option>
                         </select></div>
+                    <div class="form-control"><label>بحث بالاسم</label><input type="text" id="empFilterName"
+                            onkeyup="renderEmployees()" placeholder="ابحث عن موظف..."></div>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="printEmployeesTable()" style="background-color: var(--primary);">🖨️ طباعة الجدول</button>
+                    </div>
                 </div>
                 <div class="table-wrapper">
                     <table>
                         <thead>
-                            <tr>
-                                <th>رقم الموظف</th>
-                                <th>الاسم</th>
-                                <th>التاريخ</th>
-                                <th>الفرع</th>
-                                <th>الأجر</th>
-                                <th>الرصيد</th>
-                                <th>الدوام</th>
-                                <th>إجراءات</th>
+                                <tr>
+                                    <th>رقم الموظف</th>
+                                    <th>الاسم</th>
+                                    <th>التاريخ</th>
+                                    <th>الفرع</th>
+                                    <th>الأجر</th>
+                                    <th>الرصيد</th>
+                                    <th>الدوام</th>
+                                    <th>إجراءات</th>
                             </tr>
                         </thead>
                         <tbody id="empTableBody"></tbody>
@@ -406,11 +458,11 @@
                 <div class="table-wrapper">
                     <table>
                         <thead>
-                            <tr>
-                                <th>رقم الفرع</th>
-                                <th>اسم الفرع</th>
-                                <th>عنوان الفرع</th>
-                                <th>إجراءات</th>
+                                <tr>
+                                    <th>رقم الفرع</th>
+                                    <th>اسم الفرع</th>
+                                    <th>عنوان الفرع</th>
+                                    <th>إجراءات</th>
                             </tr>
                         </thead>
                         <tbody id="branchesTableBody"></tbody>
@@ -665,10 +717,10 @@
                                     <table>
                                         <thead>
                                             <tr>
-                                                <th>اسم الفترة</th>
-                                                <th>بداية</th>
-                                                <th>نهاية</th>
-                                                <th>إجراءات</th>
+                                            <th>اسم الفترة</th>
+                                            <th>بداية</th>
+                                            <th>نهاية</th>
+                                            <th>إجراءات</th>
                                             </tr>
                                         </thead>
                                         <tbody id="shiftPeriodsTableBody"></tbody>

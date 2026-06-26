@@ -69,6 +69,7 @@ def default_state():
 		"dailyFollowUps": [],
 		"dailyExtras": [],
 		"archivedReports": [],
+		"sentReports": [],
 		"holidays": [],
 	}
 
@@ -162,7 +163,7 @@ def _normalize_state(state):
 	clean["branches"] = clean.get("branches") or default_state()["branches"]
 	clean["users"] = _restore_admin_password_if_all_empty(clean.get("users") or default_state()["users"])
 
-	# Ensure lists exist. Added `workShifts` so saved state will accept and normalize it.
+	# Ensure lists exist. Added `workShifts` and `sentReports` so saved state will accept and normalize them.
 	for list_key in (
 		"branches",
 		"users",
@@ -173,6 +174,7 @@ def _normalize_state(state):
 		"dailyExtras",
 		"archivedReports",
 		"holidays",
+		"sentReports",
 	):
 		if not isinstance(clean.get(list_key), list):
 			clean[list_key] = []

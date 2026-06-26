@@ -227,6 +227,7 @@ table {
     border-collapse: collapse;
     margin-top: 15px;
     font-size: 14px;
+    font-weight: 700;  
 }
 
 th,

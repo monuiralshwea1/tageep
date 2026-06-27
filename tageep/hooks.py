@@ -34,8 +34,8 @@ website_route_rules = [
 # app_include_js = "/assets/tageep/js/tageep.js"
 
 # include js, css files in header of web template
-# web_include_css = "/assets/tageep/css/tageep.css"
-# web_include_js = "/assets/tageep/js/tageep.js"
+web_include_css = "/assets/tageep/css/tageep.css"
+web_include_js = "/assets/tageep/js/tageep.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "tageep/public/scss/website"

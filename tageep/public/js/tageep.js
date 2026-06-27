@@ -981,6 +981,12 @@ window.printVisibleTable = function () {
                 thead img { max-height: 40px !important; }
                 tr { page-break-inside: auto; break-inside: auto; }
                 tbody tr { orphans: 2; widows: 2; }
+                .state-absent { background: #ff0000 !important; color: #ffffff !important; font-weight: 700 !important; }
+                .state-annual { background: #e67e22 !important; color: #ffffff !important; font-weight: 700 !important; }
+                .state-present { background: #e8f5e9 !important; color: #1b5e20 !important; font-weight: 700 !important; }
+                .state-holiday { background: #e3f2fd !important; color: #1565c0 !important; font-weight: 700 !important; }
+                table, table th, table td { font-weight: 700 !important; }
+                @media print { .state-absent, .state-annual, .state-present, .state-holiday { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
             </style>
         `;
 
@@ -1676,13 +1682,21 @@ function renderMainTable() {
                 
                 if (totalVal > 0) {
                     let displayParts = '';
+                    let cellClass = '';
+                    if (absenceVal > 0 && annualVal === 0) {
+                        cellClass = 'state-absent';
+                    } else if (annualVal > 0 && absenceVal === 0) {
+                        cellClass = 'state-annual';
+                    } else if (absenceVal > 0 && annualVal > 0) {
+                        cellClass = 'state-absent';
+                    }
                     if (absenceVal > 0) {
                         displayParts += Number.isInteger(absenceVal) ? `${absenceVal}غ` : `${absenceVal.toFixed(1)}غ`;
                     }
                     if (annualVal > 0) {
                         displayParts += (displayParts ? ' ' : '') + (Number.isInteger(annualVal) ? `${annualVal}س` : `${annualVal.toFixed(1)}س`);
                     }
-                    dateColsHtml += `<td>${displayParts}</td>`;
+                    dateColsHtml += `<td class="${cellClass}">${displayParts}</td>`;
                     dateAbsenceCounts[idx] += absenceVal;
                     dateAnnualCounts[idx] += annualVal;
                 } else {
@@ -2206,13 +2220,21 @@ function renderReportTable() {
                 const totalVal = absenceVal + annualVal;
                 if (totalVal > 0) {
                     let displayParts = '';
+                    let cellClass = '';
+                    if (absenceVal > 0 && annualVal === 0) {
+                        cellClass = 'state-absent';
+                    } else if (annualVal > 0 && absenceVal === 0) {
+                        cellClass = 'state-annual';
+                    } else if (absenceVal > 0 && annualVal > 0) {
+                        cellClass = 'state-absent';
+                    }
                     if (absenceVal > 0) {
                         displayParts += Number.isInteger(absenceVal) ? `${absenceVal}غ` : `${absenceVal.toFixed(1)}غ`;
                     }
                     if (annualVal > 0) {
                         displayParts += (displayParts ? ' ' : '') + (Number.isInteger(annualVal) ? `${annualVal}س` : `${annualVal.toFixed(1)}س`);
                     }
-                    dateColsHtml += `<td>${displayParts}</td>`;
+                    dateColsHtml += `<td class="${cellClass}">${displayParts}</td>`;
                 } else {
                     dateColsHtml += `<td class="state-present">0ح</td>`;
                 }
@@ -2902,18 +2924,26 @@ function editDailyEntry(id) {
     const notesEl = document.getElementById('dailyNotes');
     if (notesEl) notesEl.value = entry.notes || '';
     
-    // تعبئة حقل الفترة
+    // تعبئة حقل الفترة (القيمة)
+    const periodVal = entry.period || entry.value || 'all';
+    // محاولة تعبئة حقل dailyPeriod إن وجد
     const periodEl = document.getElementById('dailyPeriod');
-    if (periodEl && entry.period) {
-        periodEl.value = entry.period;
+    if (periodEl) {
+        periodEl.value = periodVal;
+    } else {
+        // إذا لم يوجد dailyPeriod بعد، نعبي dailyValue
+        const valueEl = document.getElementById('dailyValue');
+        if (valueEl) valueEl.value = periodVal;
     }
     
     // تغيير نص زر الحفظ
     const btnSave = document.getElementById('btnSaveDaily');
     if (btnSave) btnSave.innerText = 'تحديث التعقيب اليومي';
     
-    alert('تم تحميل بيانات السجل للتعديل. قم بتعديل البيانات ثم اضغط على "تحديث التعقيب اليومي".');
+    // التبديل إلى لوحة التعقيب اليومي لإظهار البيانات
+    switchDailyPanel('daily-followup-panel');
 }
+
 
 function saveDailyEntry() {
     if (!canPerform('daily', 'add') && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لحفظ سجلات التعقيب اليومي');

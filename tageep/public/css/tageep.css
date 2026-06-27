@@ -200,25 +200,63 @@ button:hover {
 .state-present {
     color: #1b5e20;
     background: #e8f5e9;
-    font-weight: bold;
+    font-weight: 700;
 }
 
 .state-absent {
-    color: #c62828;
-    background: #ffebee;
-    font-weight: bold;
+    color: #ffffff;
+    background: #ff0000;
+    font-weight: 700;
 }
 
 .state-annual {
-    color: #e65100;
-    background: #fff3e0;
-    font-weight: bold;
+    color: #ffffff;
+    background: #e67e22;
+    font-weight: 700;
 }
 
 .state-holiday {
     color: #1565c0;
     background: #e3f2fd;
-    font-weight: bold;
+    font-weight: 700;
+}
+
+/* دعم الألوان عند الطباعة */
+@media print {
+    .state-present,
+    .state-absent,
+    .state-annual,
+    .state-holiday {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .state-absent {
+        background: #ff0000 !important;
+        color: #ffffff !important;
+    }
+
+    .state-annual {
+        background: #e67e22 !important;
+        color: #ffffff !important;
+    }
+
+    .state-present {
+        background: #e8f5e9 !important;
+        color: #1b5e20 !important;
+    }
+
+    .state-holiday {
+        background: #e3f2fd !important;
+        color: #1565c0 !important;
+    }
+
+    /* ضمان أن خط الجداول عند الطباعة بوزن 700 */
+    table,
+    table th,
+    table td {
+        font-weight: 700 !important;
+    }
 }
 
 /* Tables */

@@ -814,6 +814,7 @@ window.updatePrintPreview = function () {
                     border: 1px solid #000;
                     word-break: keep-all;
                 }
+                    
                 th { 
                     background-color: #dcedc8; 
                     font-weight: bold;
@@ -1343,6 +1344,7 @@ function renderAll() {
             case 'tab-main': tabKey = 'main'; break;
             case 'tab-daily': tabKey = 'daily'; break;
             case 'tab-archive': tabKey = 'archive'; break;
+            case 'tab-sent': tabKey = 'archive'; break;
             case 'tab-employees': tabKey = 'employees'; break;
             case 'tab-branches': tabKey = 'branches'; break;
             case 'tab-users': tabKey = 'users'; break;
@@ -1412,6 +1414,7 @@ function renderAll() {
     renderDailyFollowups();
     renderDailyExtras();
     renderArchiveReports();
+    renderSentReports();
     renderHolidays();
     renderWorkShifts();
     renderShiftPeriods();
@@ -1573,7 +1576,8 @@ function renderMainTable() {
         existingDynamicCells.forEach(cell => cell.remove());
         
             // إضافة الخلايا الجديدة بعد عمود "الأيام المتوقعة" وقبل عمود "أيام الغياب"
-            const insertBeforeCell = headerRow.children[5]; // العمود "أيام الغياب" (index 5)
+            // تم التعديل: index 6 بدلاً من 5 بسبب إضافة عمود "م"
+            const insertBeforeCell = headerRow.children[6]; // العمود "أيام الغياب" (index 6)
             workingDates.forEach((dateStr, idx) => {
                 const th = document.createElement('th');
                 th.className = 'dyn-date-cell dyn-date'; // dyn-date للتوافق مع makeTableSortable
@@ -1607,7 +1611,8 @@ function renderMainTable() {
     
     // حساب العدد الإجمالي للأعمدة (لـ colspan)
     // الكود الأصلي: TOTAL_BASE_COLS_BEFORE = 5 (رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة)
-    const TOTAL_BASE_COLS_BEFORE = 5; // رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة
+    // تم التعديل: إضافة عمود "م" في البداية
+    const TOTAL_BASE_COLS_BEFORE = 6; // م, رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة
     const TOTAL_BASE_COLS_AFTER = 7;  // الغياب, الإجازات, الفعلية, الأجر, الإضافي, الصافي, الإجراءات
     const totalCols = TOTAL_BASE_COLS_BEFORE + workingDates.length + TOTAL_BASE_COLS_AFTER;
     // ===== نهاية التعديل =====
@@ -1644,6 +1649,7 @@ function renderMainTable() {
     const holidaysInRange = db.holidays.filter(h => h.date >= from && h.date <= to).map(h => h.date);
 
     filtered.forEach((emp, rowIdx) => {
+        const rowNum = rowIdx + 1;
         const branchName = db.branches.find(b => b.id === emp.branchId)?.name || '';
         const expectedDays = workingDates.length;
         const dayWage = parseFloat(emp.wage) || 0;
@@ -1719,6 +1725,7 @@ function renderMainTable() {
 
         tbody.innerHTML += `
             <tr>
+                <td style="font-weight:bold;">${rowNum}</td>
                 <td>${emp.employeeNumber || ''}</td>
                 <td>${emp.name}</td>
                 <td>${branchName}</td>
@@ -1752,6 +1759,7 @@ function renderMainTable() {
 
     tbody.innerHTML += `
         <tr style="font-weight:bold; background:#f0f0f0;">
+            <td></td>
             <td colspan="4">المجموع</td>
             <td>${totalExpectedAll}</td>
             ${dynTotalsCells}
@@ -2123,8 +2131,8 @@ function renderReportTable() {
         const existingDynamicCells = headerRow.querySelectorAll('.dyn-date-cell');
         existingDynamicCells.forEach(cell => cell.remove());
         
-        // إدراج الأعمدة قبل عمود "أيام الحضور" (index 6)
-        const insertBeforeCell = headerRow.children[6];
+        // إدراج الأعمدة قبل عمود "أيام الحضور" (index 7 بسبب إضافة عمود "م")
+        const insertBeforeCell = headerRow.children[7];
         workingDates.forEach((dateStr) => {
             const th = document.createElement('th');
             th.className = 'dyn-date-cell dyn-date';
@@ -2167,7 +2175,8 @@ function renderReportTable() {
         dateRangeEl.innerText = `${reportTitle} (من ${from || '? '} إلى ${to || '? '})`;
     }
 
-    filtered.forEach(emp => {
+    filtered.forEach((emp, rowIdx) => {
+        const rowNum = rowIdx + 1;
         const branchName = db.branches.find(b => b.id === emp.branchId)?.name || '';
         const shiftName = db.workShifts.find(s => s.id === emp.shiftId)?.name || '';
         const totals = getAbsenceTotalsForEmployee(emp, from, to);
@@ -2243,6 +2252,7 @@ function renderReportTable() {
 
         tbody.innerHTML += `
             <tr>
+                <td style="font-weight:bold;">${rowNum}</td>
                 <td>${emp.employeeNumber || ''}</td>
                 <td>${emp.name}</td>
                 <td>${branchName}</td>
@@ -2881,7 +2891,8 @@ function renderDailyFollowups() {
             && (!to || item.date <= to);
     });
 
-    filtered.forEach(item => {
+    filtered.forEach((item, rowIdx) => {
+        const rowNum = rowIdx + 1;
         const employee = db.employees.find(e => e.id === item.empId) || { name: '' };
         const branchName = db.branches.find(b => b.id === item.branchId)?.name || '';
         const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
@@ -2895,6 +2906,7 @@ function renderDailyFollowups() {
 
         tbody.innerHTML += `
             <tr>
+                <td style="font-weight:bold;">${rowNum}</td>
                 <td>${getDayName(item.date)} - ${item.date}</td>
                 <td>${employee.employeeNumber || ''}</td>
                 <td>${employee.name}</td>

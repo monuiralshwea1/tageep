@@ -744,6 +744,8 @@ window.updatePrintPreview = function () {
         const dateRangeText = dateRangeEl ? dateRangeEl.innerText : '';
         
         const tableClone = table.cloneNode(true);
+        // إزالة أيقونات العين (👁️) من الطباعة
+        tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
         const rows = tableClone.querySelectorAll('tr');
         rows.forEach(row => {
             const lastCell = row.querySelector('td:last-child, th:last-child');
@@ -921,6 +923,8 @@ window.printVisibleTable = function () {
         const dateRangeText = dateRangeEl ? dateRangeEl.innerText : '';
 
         const tableClone = table.cloneNode(true);
+        // إزالة أيقونات العين (👁️) من الطباعة
+        tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
         const rows = tableClone.querySelectorAll('tr');
         rows.forEach(row => {
             const lastCell = row.querySelector('td:last-child, th:last-child');
@@ -1139,6 +1143,8 @@ function initDates() {
     const today = new Date();
     const lastWeek = new Date(today);
     lastWeek.setDate(today.getDate() - 6);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
 
     document.getElementById('filterTo').value = today.toISOString().split('T')[0];
     document.getElementById('filterFrom').value = lastWeek.toISOString().split('T')[0];
@@ -1153,6 +1159,16 @@ function initDates() {
     const reportTo = document.getElementById('reportTo');
     if (reportFrom) reportFrom.value = lastWeek.toISOString().split('T')[0];
     if (reportTo) reportTo.value = today.toISOString().split('T')[0];
+    // تعيين فلاتر التاريخ في صفحة الأرشفة (التعقيب المؤرشيف والمرسل) افتراضياً:
+    // من يوم أمس إلى اليوم الحالي
+    const archiveFilterFrom = document.getElementById('archiveFilterFrom');
+    const archiveFilterTo = document.getElementById('archiveFilterTo');
+    if (archiveFilterFrom) archiveFilterFrom.value = yesterday.toISOString().split('T')[0];
+    if (archiveFilterTo) archiveFilterTo.value = today.toISOString().split('T')[0];
+    const sentFilterFrom = document.getElementById('sentFilterFrom');
+    const sentFilterTo = document.getElementById('sentFilterTo');
+    if (sentFilterFrom) sentFilterFrom.value = yesterday.toISOString().split('T')[0];
+    if (sentFilterTo) sentFilterTo.value = today.toISOString().split('T')[0];
     // تعبئة قائمة السنوات وتعيين الشهر الحالي للتقرير
     populateReportYearSelect();
     const currentMonth = String(today.getMonth() + 1);
@@ -1854,6 +1870,8 @@ function printReportTable() {
     const headerFontSize = isPortrait ? '9px' : '11px';
 
     const tableClone = table.cloneNode(true);
+    // إزالة أيقونات العين (👁️) من الطباعة
+    tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
     const rows = tableClone.querySelectorAll('tr');
     rows.forEach(row => {
         const lastCell = row.querySelector('td:last-child, th:last-child');
@@ -1970,6 +1988,8 @@ function updatePrintPreviewWithTitle(customTitle) {
         const logoUrl = db.settings.logo || '';
         
         const tableClone = table.cloneNode(true);
+        // إزالة أيقونات العين (👁️) من الطباعة
+        tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
         const rows = tableClone.querySelectorAll('tr');
         rows.forEach(row => {
             const lastCell = row.querySelector('td:last-child, th:last-child');
@@ -2175,6 +2195,15 @@ function renderReportTable() {
         dateRangeEl.innerText = `${reportTitle} (من ${from || '? '} إلى ${to || '? '})`;
     }
 
+    // ===== حساب المجاميع =====
+    let totalExpectedAll = 0;
+    let totalAbsenceAll = 0;
+    let totalAnnualAll = 0;
+    let totalActualAll = 0;
+    let totalNetAll = 0;
+    const dateAbsenceCounts = workingDates.map(() => 0);
+    const dateAnnualCounts = workingDates.map(() => 0);
+
     filtered.forEach((emp, rowIdx) => {
         const rowNum = rowIdx + 1;
         const branchName = db.branches.find(b => b.id === emp.branchId)?.name || '';
@@ -2192,6 +2221,26 @@ function renderReportTable() {
         const totalExtra = extras.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
         const dayWage = parseFloat(emp.wage) || 0;
         const salary = actualDays * dayWage + totalExtra;
+
+        totalExpectedAll += expectedDays;
+        totalAbsenceAll += absenceDays;
+        totalAnnualAll += annualUsed;
+        totalActualAll += actualDays;
+        totalNetAll += salary;
+
+        // تجميع مجاميع خلايا التاريخ
+        workingDates.forEach((d, idx) => {
+            if (!d) return;
+            const statusArr = getDailyStatusArray(emp, d);
+            const N = statusArr.length || 1;
+            let absentCount = 0, annualCount = 0, holidayCount = 0;
+            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'holiday_present') holidayCount++; });
+            const holidaysSet = new Set((db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date));
+            if (!(holidayCount === N && holidaysSet.has(d))) {
+                dateAbsenceCounts[idx] += absentCount / N;
+                dateAnnualCounts[idx] += annualCount / N;
+            }
+        });
 
         // عمود الفترة: يعرض اسم الفترة المحددة، أو أسماء فترات الدوام إذا كان الكل
         let periodText = '-';
@@ -2269,6 +2318,34 @@ function renderReportTable() {
                 <td>${salary.toLocaleString()}</td>
             </tr>`;
     });
+
+    // ===== صف المجموع في جدول التقرير =====
+    let dynTotalsCells = '';
+    workingDates.forEach((d, idx) => {
+        const absVal = dateAbsenceCounts[idx] || 0;
+        const annVal = dateAnnualCounts[idx] || 0;
+        let display = '';
+        if (absVal > 0) display += (Number.isInteger(absVal) ? absVal : absVal.toFixed(1)) + 'غ';
+        if (annVal > 0) {
+            display += (display ? ' ' : '') + (Number.isInteger(annVal) ? annVal : annVal.toFixed(1)) + 'س';
+        }
+        dynTotalsCells += `<td style="font-weight:bold;">${display}</td>`;
+    });
+
+    tbody.innerHTML += `
+        <tr style="font-weight:bold; background:#f0f0f0;">
+            <td></td>
+            <td colspan="5">المجموع</td>
+            <td></td>
+            ${dynTotalsCells}
+            <td style="color:green;">${totalActualAll}</td>
+            <td style="color:red;">${totalAbsenceAll}</td>
+            <td style="color:#e67e22;">${totalAnnualAll}</td>
+            <td></td>
+            <td></td>
+            <td>${db.dailyExtras.filter(x => x.date >= from && x.date <= to && filtered.some(emp => emp.id === x.empId)).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0).toLocaleString()}</td>
+            <td style="background:#e8f8f5;">${totalNetAll.toLocaleString()}</td>
+        </tr>`;
 }
 
 // ========== CRUD EMPLOYEES ==========
@@ -4892,11 +4969,16 @@ function sortTableData(table, colIndex) {
     const tbody = tbl.querySelector('tbody');
     if (!tbody) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
-    // استبعاد صف المجموع إن وجد
+    // استبعاد صف المجموع إن وجد (يبحث في جميع الخلايا عن نص "المجموع")
     let totalRow = null;
-    const lastRow = rows[rows.length - 1];
-    if (lastRow && lastRow.cells.length > 0 && lastRow.cells[0].textContent.trim() === 'المجموع') {
-        totalRow = rows.pop();
+    if (rows.length > 0) {
+        const lastRow = rows[rows.length - 1];
+        if (lastRow && lastRow.cells.length > 0) {
+            const hasTotal = Array.from(lastRow.cells).some(cell => cell.textContent.trim() === 'المجموع');
+            if (hasTotal) {
+                totalRow = rows.pop();
+            }
+        }
     }
     if (rows.length <= 1) return;
 

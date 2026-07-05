@@ -18,6 +18,9 @@ let db = {
     absences: [], // {id, empId, date, value, type:'absent'|'annual'|'holiday_present'}
     dailyFollowUps: [], // {id, empId, branchId, date, statusType, value, notes, createdAt}
     dailyExtras: [], // {id, empId, date, amount, notes, createdAt}
+    // تعديل جديد: قائمة السلف اليومية، بنفس بنية الإضافي تقريباً.
+    // الكود الأصلي لم يكن يحتوي على dailyAdvances.
+    dailyAdvances: [], // {id, empId, date, amount, notes, createdAt}
     archivedReports: [], // {id, branchId, branchName, date, createdAt, entries, fileName}
     sentReports: [], // {id, branchId, branchName, date, createdAt, entries, status:'pending'|'transferred'}
     holidays: [], // {id, name, date}
@@ -47,6 +50,12 @@ function normalizeAppState(data) {
             value: parseFloat(item.value) || 1
         })),
         dailyExtras: (data.dailyExtras || []).map(item => ({
+            ...item,
+            amount: parseFloat(item.amount) || 0
+        })),
+        // تعديل جديد: تطبيع السلف عند تحميل الحالة من السيرفر أو localStorage.
+        // الكود الأصلي معطل: لم تكن هناك dailyAdvances ضمن normalizeAppState.
+        dailyAdvances: (data.dailyAdvances || []).map(item => ({
             ...item,
             amount: parseFloat(item.amount) || 0
         })),
@@ -104,6 +113,32 @@ function getEmployeeLabel(id) {
     return `${emp.name || ''}${emp.employeeNumber ? ' (' + emp.employeeNumber + ')' : ''}`;
 }
 
+// تعديل جديد: تعريف مركزي لأنواع حالات التعقيب حتى تشمل "إجازة أخرى".
+// الكود الأصلي معطل: كان يكرر شروطاً ثلاثية في عدة أماكن بدون other_leave.
+const DAILY_STATUS_OPTIONS = ['present', 'absent', 'annual', 'other_leave', 'holiday_present'];
+const DAILY_STATUS_LABELS = {
+    present: 'حاضر',
+    absent: 'غائب',
+    annual: 'إجازة سنوية',
+    other_leave: 'إجازة أخرى',
+    holiday_present: 'مناسبة'
+};
+
+function getDailyStatusLabel(statusType) {
+    return DAILY_STATUS_LABELS[statusType] || statusType || '';
+}
+
+function getLeaveDeductionValue(statusType, period) {
+    if (statusType !== 'annual' && statusType !== 'other_leave') return 0;
+    return (!period || period === 'all') ? 1 : 0.5;
+}
+
+function buildDailyStatusOptions(selectedStatus) {
+    return DAILY_STATUS_OPTIONS
+        .map(status => `<option value="${status}" ${selectedStatus === status ? 'selected' : ''}>${getDailyStatusLabel(status)}</option>`)
+        .join('');
+}
+
 // دالة مساعدة: ترجع الموظفين المقيدين بفرع معين، أو كل الموظفين إذا كان الفرع 'all'
 function getFilteredEmployeesByBranch(branchId) {
     if (!branchId || branchId === 'all' || branchId === '') return db.employees;
@@ -128,10 +163,10 @@ function refreshCurrentView() {
     const activeTab = document.querySelector('.tab-content.active');
     if (!activeTab) return;
     const activeId = activeTab.id;
-    
+
     // Update all dropdowns to reflect new data
     refreshAllDropdowns();
-    
+
     // Refresh tables based on active tab
     switch (activeId) {
         case 'tab-main':
@@ -142,6 +177,9 @@ function refreshCurrentView() {
         case 'tab-daily':
             renderDailyFollowups();
             renderDailyExtras();
+            // تعديل جديد: تحديث جدول السلف عند تحديث تبويب التعقيب اليومي.
+            // الكود الأصلي كان يحدث التعقيب اليومي والإضافي فقط.
+            renderDailyAdvances();
             break;
         case 'tab-employees':
             renderEmployees();
@@ -173,7 +211,7 @@ function refreshAllDropdowns() {
     const currentFilterBranchVal = document.getElementById('dailyFilterBranch')?.value || 'all';
     const currentEmps = getFilteredEmployeesByBranch(currentBranchVal);
     const currentFilterEmps = getFilteredEmployeesByBranch(currentFilterBranchVal);
-    
+
     // تعبئة قائمة الموظفين في نموذج الإضافة (مرتبطة بـ dailyBranch)
     const dailyEmpEl = document.getElementById('dailyEmp');
     if (dailyEmpEl) {
@@ -186,7 +224,7 @@ function refreshAllDropdowns() {
             dailyEmpEl.value = savedValue;
         }
     }
-    
+
     // تعبئة قائمة الموظفين في فلتر التعقيب اليومي (مرتبطة بـ dailyFilterBranch)
     const dailyFilterEmpEl = document.getElementById('dailyFilterEmp');
     if (dailyFilterEmpEl) {
@@ -199,7 +237,7 @@ function refreshAllDropdowns() {
             dailyFilterEmpEl.value = savedValue;
         }
     }
-    
+
     // تعبئة قائمة الموظفين في الإضافي (مرتبطة بـ dailyBranch)
     const extraEmpEl = document.getElementById('extraEmp');
     if (extraEmpEl) {
@@ -212,7 +250,7 @@ function refreshAllDropdowns() {
             extraEmpEl.value = savedValue;
         }
     }
-    
+
     // تعبئة قائمة الموظفين في فلتر الإضافي (مرتبطة بـ dailyFilterBranch)
     const extraFilterEmpEl = document.getElementById('extraFilterEmp');
     if (extraFilterEmpEl) {
@@ -225,12 +263,39 @@ function refreshAllDropdowns() {
             extraFilterEmpEl.value = savedValue;
         }
     }
-    
+
+    // تعديل جديد: تعبئة قائمة الموظفين في السلف (مرتبطة بـ dailyBranch).
+    // الكود الأصلي معطل: كان يدعم قوائم الإضافي فقط.
+    const advanceEmpEl = document.getElementById('advanceEmp');
+    if (advanceEmpEl) {
+        const savedValue = advanceEmpEl.value;
+        advanceEmpEl.innerHTML = '<option value="">اختر موظفاً</option>';
+        currentEmps.forEach(e => {
+            advanceEmpEl.innerHTML += `<option value="${e.id}">${e.name}</option>`;
+        });
+        if (savedValue && currentEmps.find(e => e.id === savedValue)) {
+            advanceEmpEl.value = savedValue;
+        }
+    }
+
+    // تعديل جديد: تعبئة قائمة فلتر السلف (مرتبطة بـ dailyFilterBranch).
+    const advanceFilterEmpEl = document.getElementById('advanceFilterEmp');
+    if (advanceFilterEmpEl) {
+        const savedValue = advanceFilterEmpEl.value;
+        advanceFilterEmpEl.innerHTML = '<option value="all">الكل</option>';
+        currentFilterEmps.forEach(e => {
+            advanceFilterEmpEl.innerHTML += `<option value="${e.id}">${e.name}</option>`;
+        });
+        if (savedValue && currentFilterEmps.find(e => e.id === savedValue)) {
+            advanceFilterEmpEl.value = savedValue;
+        }
+    }
+
     // تحديد الفروع حسب المستخدم
     const isBranchUser = currentUser && currentUser.role !== 'admin';
     const userBranchId = isBranchUser ? currentUser.branchId : null;
     const empsForBranches = isBranchUser && userBranchId ? db.branches.filter(b => b.id === userBranchId) : db.branches;
-    
+
     // Branch selects
     const branchSelects = [
         document.getElementById('empBranch'),
@@ -259,11 +324,11 @@ function refreshAllDropdowns() {
             select.disabled = true;
         }
     });
-    
+
     // Report shift dropdown
     const reportShift = document.getElementById('reportShift');
     if (reportShift) {
-        reportShift.innerHTML = '<option value="all">الكل</option>' + 
+        reportShift.innerHTML = '<option value="all">الكل</option>' +
             db.workShifts.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
         renderReportPeriodFilter();
     }
@@ -384,27 +449,30 @@ function getAbsenceTotalsForEmployee(emp, from, to) {
     const workingDates = getWorkingDatesBetween(from, to);
     let absenceDays = 0;
     let annualDays = 0;
+    let otherLeaveDays = 0;
     let holidayPresent = 0;
     const holidaysSet = new Set((db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date));
     workingDates.forEach(date => {
         const statusArr = getDailyStatusArray(emp, date);
         const N = statusArr.length || 1;
-        let absentCount = 0, annualCount = 0, holidayCount = 0;
+        let absentCount = 0, annualCount = 0, otherLeaveCount = 0, holidayCount = 0;
         statusArr.forEach(s => {
             if (s === 'absent') absentCount++;
             if (s === 'annual') annualCount++;
+            if (s === 'other_leave') otherLeaveCount++;
             if (s === 'holiday_present') holidayCount++;
         });
-        
+
         if (holidayCount === N && holidaysSet.has(date)) {
             holidayPresent += 1;
             return;
         }
-        // حساب الغياب والإجازات السنوية منفصلين
+        // حساب الغياب والإجازات السنوية والإجازة الأخرى منفصلين
         absenceDays += absentCount / N;
         annualDays += annualCount / N;
+        otherLeaveDays += otherLeaveCount / N;
     });
-    return { absenceDays, annualDays, holidayPresent };
+    return { absenceDays, annualDays, otherLeaveDays, holidayPresent };
 }
 
 function getApiErrorMessage(data, fallback) {
@@ -516,27 +584,27 @@ async function activateLicense() {
 function makeSelectSearchable(selectEl, placeholderText) {
     if (!selectEl || selectEl.dataset.searchable === 'true') return;
     selectEl.dataset.searchable = 'true';
-    
+
     // حفظ قيمة الـ select الأصلية للرجوع إليها
     selectEl.setAttribute('data-original-display', selectEl.style.display || '');
-    
+
     // إنشاء الحاوية
     const container = document.createElement('div');
     container.className = 'searchable-select-container';
     container.style.cssText = 'position:relative;display:inline-block;width:100%;min-width:150px;';
-    
+
     // حقل الإدخال
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'searchable-select-input';
     input.placeholder = placeholderText || 'ابحث...';
     input.style.cssText = 'width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;box-sizing:border-box;background:#fff;';
-    
+
     // القائمة المنسدلة للنتائج
     const dropdown = document.createElement('div');
     dropdown.className = 'searchable-select-dropdown';
     dropdown.style.cssText = 'display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #ccc;border-top:none;max-height:200px;overflow-y:auto;z-index:1000;border-radius:0 0 4px 4px;box-shadow:0 4px 8px rgba(0,0,0,0.1);';
-    
+
     // إخفاء الـ select الأصلي
     selectEl.style.display = 'none';
     selectEl.parentNode.insertBefore(container, selectEl);
@@ -563,7 +631,7 @@ function makeSelectSearchable(selectEl, placeholderText) {
         const filter = normalizeText(filterText || '');
         dropdown.innerHTML = '';
         let hasResults = false;
-        
+
         Array.from(selectEl.options).forEach(opt => {
             if (!opt.value) return;
             const text = opt.text || '';
@@ -572,29 +640,29 @@ function makeSelectSearchable(selectEl, placeholderText) {
             labelEl.style.cssText = 'padding:8px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;';
             labelEl.textContent = text;
             const val = opt.value;
-            
+
             // تطبيق الفلتر
             if (!filter || normalizeText(text).includes(filter)) {
                 hasResults = true;
-                labelEl.addEventListener('click', function(e) {
+                labelEl.addEventListener('click', function (e) {
                     e.preventDefault();
                     e.stopPropagation();
                     selectItem(val, text);
                 });
-                labelEl.addEventListener('mousedown', function(e) {
+                labelEl.addEventListener('mousedown', function (e) {
                     e.preventDefault();
                     selectItem(val, text);
                 });
-                labelEl.addEventListener('mouseenter', function() {
+                labelEl.addEventListener('mouseenter', function () {
                     this.style.background = '#e8f0fe';
                 });
-                labelEl.addEventListener('mouseleave', function() {
+                labelEl.addEventListener('mouseleave', function () {
                     this.style.background = '#fff';
                 });
                 dropdown.appendChild(labelEl);
             }
         });
-        
+
         if (!hasResults) {
             const noResults = document.createElement('div');
             noResults.style.cssText = 'padding:8px 10px;color:#999;font-size:12px;text-align:center;';
@@ -604,7 +672,7 @@ function makeSelectSearchable(selectEl, placeholderText) {
     }
 
     // إظهار القائمة عند التركيز على حقل الإدخال
-    input.addEventListener('focus', function() {
+    input.addEventListener('focus', function () {
         const selectedOpt = selectEl.options[selectEl.selectedIndex];
         if (selectedOpt && selectedOpt.value) {
             input.value = selectedOpt.text;
@@ -616,13 +684,13 @@ function makeSelectSearchable(selectEl, placeholderText) {
     });
 
     // الفلتر أثناء الكتابة
-    input.addEventListener('input', function() {
+    input.addEventListener('input', function () {
         dropdown.style.display = 'block';
         updateDropdown(this.value);
     });
 
     // إخفاء القائمة عند فقدان التركيز
-    input.addEventListener('blur', function() {
+    input.addEventListener('blur', function () {
         setTimeout(() => {
             dropdown.style.display = 'none';
             const selectedOpt = selectEl.options[selectEl.selectedIndex];
@@ -633,7 +701,7 @@ function makeSelectSearchable(selectEl, placeholderText) {
     });
 
     // مفتاح ESC لإغلاق القائمة
-    input.addEventListener('keydown', function(e) {
+    input.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
             dropdown.style.display = 'none';
         }
@@ -646,7 +714,7 @@ function makeSelectSearchable(selectEl, placeholderText) {
     });
 
     // تحديث القائمة عند تغيير الـ select من الخارج
-    selectEl.addEventListener('change', function() {
+    selectEl.addEventListener('change', function () {
         const selectedOpt = this.options[this.selectedIndex];
         if (selectedOpt && selectedOpt.value) {
             input.value = selectedOpt.text;
@@ -665,16 +733,18 @@ function makeSelectSearchable(selectEl, placeholderText) {
 // تفعيل خاصية البحث في جميع القوائم المهمة
 function enableSearchableSelects() {
     const selectIds = [
-        'filterBranch', 'dailyBranch', 'dailyFilterBranch', 'archiveFilterBranch', 
+        'filterBranch', 'dailyBranch', 'dailyFilterBranch', 'archiveFilterBranch',
         'empBranch', 'empFilterBranch', 'reportBranch', 'userBranch',
-        'dailyEmp', 'dailyFilterEmp', 'extraEmp', 'extraFilterEmp',
+        // تعديل جديد: إضافة قوائم السلف للبحث مثل قوائم الإضافي.
+        // الكود الأصلي معطل: 'dailyEmp', 'dailyFilterEmp', 'extraEmp', 'extraFilterEmp',
+        'dailyEmp', 'dailyFilterEmp', 'extraEmp', 'extraFilterEmp', 'advanceEmp', 'advanceFilterEmp',
         'empShift', 'reportShift', 'reportPeriod',
         'selectedShiftSelect'
     ];
     selectIds.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            const placeholder = el.tagName === 'SELECT' ? 
+            const placeholder = el.tagName === 'SELECT' ?
                 (el.options[0]?.text || 'ابحث...') : 'ابحث...';
             makeSelectSearchable(el, placeholder);
         }
@@ -701,10 +771,10 @@ window.openPrintPreview = function () {
             alert('لا توجد جداول للطباعة في الواجهة الحالية');
             return;
         }
-        
+
         const savedPaperSize = localStorage.getItem('tageep_paper_size') || 'A4';
         document.getElementById('previewPaperSize').value = savedPaperSize;
-        
+
         document.getElementById('printPreviewModal').style.display = 'block';
         updatePrintPreview();
     } catch (err) {
@@ -720,10 +790,10 @@ window.updatePrintPreview = function () {
     try {
         const paperSize = document.getElementById('previewPaperSize').value;
         const orientation = document.getElementById('previewOrientation').value;
-        
+
         localStorage.setItem('tageep_paper_size', paperSize);
         localStorage.setItem('tageep_orientation', orientation);
-        
+
         let activeTab = document.querySelector('.tab-content.active');
         let table = activeTab ? activeTab.querySelector('table') : null;
         if (!table) {
@@ -737,12 +807,12 @@ window.updatePrintPreview = function () {
             }
         }
         if (!table) return;
-        
+
         const companyName = db.settings.companyName || '';
         const logoUrl = db.settings.logo || '';
         const dateRangeEl = document.getElementById('printDateRange');
         const dateRangeText = dateRangeEl ? dateRangeEl.innerText : '';
-        
+
         const tableClone = table.cloneNode(true);
         // إزالة أيقونات العين (👁️) من الطباعة
         tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
@@ -753,16 +823,16 @@ window.updatePrintPreview = function () {
                 lastCell.remove();
             }
         });
-        
+
         const firstRow = tableClone.querySelector('tr');
         const colCount = firstRow ? firstRow.cells.length : 1;
-        
+
         const originalThead = tableClone.querySelector('thead');
         let columnHeadersHtml = '';
         if (originalThead) {
             columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
         }
-        
+
         const logoHtml = logoUrl
             ? `<img src="${logoUrl}" style="width:100%;height:auto;object-fit:fill;display:block;margin:0;padding:0;" alt="شعار الشركة">`
             : '';
@@ -773,26 +843,26 @@ window.updatePrintPreview = function () {
                 <div style="font-size:11px;color:#666;margin-bottom:3px;">${dateRangeText}</div>
             </td>
         </tr>`;
-        
+
         const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
-        
+
         const tableHtml = tableClone.outerHTML;
         const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
-        
+
         const paperSizeStyles = {
             'A4': { width: '210mm', height: '297mm' },
             'A5': { width: '148mm', height: '210mm' },
             'Letter': { width: '216mm', height: '279mm' },
             'Legal': { width: '216mm', height: '356mm' }
         };
-        
+
         const selectedSize = paperSizeStyles[paperSize] || paperSizeStyles['A4'];
-        
+
         const isPortrait = orientation === 'portrait';
         const fontSize = isPortrait ? '7px' : '10px';
         const cellPadding = isPortrait ? '1.5px 2px' : '4px 5px';
         const headerFontSize = isPortrait ? '9px' : '11px';
-        
+
         const printStyles = `
             <style>
                 @page { 
@@ -841,7 +911,7 @@ window.updatePrintPreview = function () {
                 }
             </style>
         `;
-        
+
         const previewContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -854,21 +924,21 @@ window.updatePrintPreview = function () {
     ${finalHtml}
 </body>
 </html>`;
-        
+
         const previewFrame = document.createElement('iframe');
         previewFrame.style.width = '100%';
         previewFrame.style.height = '600px';
         previewFrame.style.border = 'none';
-        
+
         const previewContentDiv = document.getElementById('printPreviewContent');
         previewContentDiv.innerHTML = '';
         previewContentDiv.appendChild(previewFrame);
-        
+
         const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(previewContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
             try {
                 const iframeBody = previewFrame.contentDocument.body;
@@ -881,7 +951,7 @@ window.updatePrintPreview = function () {
                 document.getElementById('pageCount').innerText = 'عدد الصفحات: غير متاح';
             }
         }, 1000);
-        
+
     } catch (err) {
         console.error('updatePrintPreview error:', err);
     }
@@ -1020,16 +1090,16 @@ window.printVisibleTable = function () {
             printFrame.style.width = '0';
             printFrame.style.height = '0';
             document.body.appendChild(printFrame);
-            
+
             const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
             iframeDoc.open();
             iframeDoc.write(printContent);
             iframeDoc.close();
-            
+
             setTimeout(() => {
                 try {
                     printFrame.contentWindow.print();
-                } catch(e) {
+                } catch (e) {
                     console.error('iframe print error:', e);
                     window.print();
                 }
@@ -1039,12 +1109,12 @@ window.printVisibleTable = function () {
             }, 500);
             return;
         }
-        
+
         printWindow.document.open();
         printWindow.document.write(printContent);
         printWindow.document.close();
-        
-        printWindow.onload = function() {
+
+        printWindow.onload = function () {
             setTimeout(() => {
                 printWindow.print();
             }, 500);
@@ -1052,7 +1122,7 @@ window.printVisibleTable = function () {
         setTimeout(() => {
             printWindow.print();
         }, 1000);
-        
+
     } catch (err) {
         console.error('printVisibleTable error:', err);
         window.print();
@@ -1151,10 +1221,19 @@ function initDates() {
     document.getElementById('empDate').value = today.toISOString().split('T')[0];
     document.getElementById('dailyDate').value = today.toISOString().split('T')[0];
     document.getElementById('extraDate').value = today.toISOString().split('T')[0];
+    // تعديل جديد: تهيئة تاريخ السلفة بنفس تهيئة تاريخ الإضافي.
+    // الكود الأصلي لم يكن يحتوي على حقول advanceDate.
+    const advanceDate = document.getElementById('advanceDate');
+    if (advanceDate) advanceDate.value = today.toISOString().split('T')[0];
     document.getElementById('dailyFilterTo').value = today.toISOString().split('T')[0];
     document.getElementById('dailyFilterFrom').value = lastWeek.toISOString().split('T')[0];
     document.getElementById('extraFilterTo').value = today.toISOString().split('T')[0];
     document.getElementById('extraFilterFrom').value = lastWeek.toISOString().split('T')[0];
+    // تعديل جديد: فلاتر السلف الافتراضية بنفس نطاق الإضافي.
+    const advanceFilterTo = document.getElementById('advanceFilterTo');
+    const advanceFilterFrom = document.getElementById('advanceFilterFrom');
+    if (advanceFilterTo) advanceFilterTo.value = today.toISOString().split('T')[0];
+    if (advanceFilterFrom) advanceFilterFrom.value = lastWeek.toISOString().split('T')[0];
     const reportFrom = document.getElementById('reportFrom');
     const reportTo = document.getElementById('reportTo');
     if (reportFrom) reportFrom.value = lastWeek.toISOString().split('T')[0];
@@ -1201,12 +1280,12 @@ function addOrReplaceAbsenceRecord(newRec) {
     const existing = db.absences.find(a => a.empId === newRec.empId && a.date === newRec.date);
     if (existing) {
         if (existing.type === 'annual' && emp) {
-            emp.leaveBalance = parseFloat(emp.leaveBalance) + parseFloat(existing.value);
+            emp.leaveBalance = parseFloat(emp.leaveBalance) + parseFloat(existing.value || 1);
         }
         db.absences = db.absences.filter(a => !(a.empId === newRec.empId && a.date === newRec.date));
     }
     if (newRec.type === 'annual' && emp) {
-        emp.leaveBalance = parseFloat(emp.leaveBalance) - parseFloat(newRec.value);
+        emp.leaveBalance = parseFloat(emp.leaveBalance) - parseFloat(newRec.value || 1);
     }
     db.absences.push(newRec);
 }
@@ -1286,7 +1365,7 @@ function renderAll() {
     function populateEmployeeSelects() {
         const dailyBranchVal = document.getElementById('dailyBranch').value;
         const filteredEmps = getFilteredEmployeesByBranch(dailyBranchVal);
-        
+
         document.getElementById('dailyEmp').innerHTML = `<option value="">اختر موظفاً</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
         const dailyEmpEl = document.getElementById('dailyEmp');
         if (dailyEmpEl) {
@@ -1295,14 +1374,20 @@ function renderAll() {
         document.getElementById('dailyFilterEmp').innerHTML = `<option value="all">الكل</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
         document.getElementById('extraEmp').innerHTML = `<option value="">اختر موظفاً</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
         document.getElementById('extraFilterEmp').innerHTML = `<option value="all">الكل</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+        // تعديل جديد: تعبئة قوائم السلف بنفس مصدر قوائم الإضافي.
+        // الكود الأصلي لم يكن يحتوي على advanceEmp أو advanceFilterEmp.
+        const advanceEmp = document.getElementById('advanceEmp');
+        const advanceFilterEmp = document.getElementById('advanceFilterEmp');
+        if (advanceEmp) advanceEmp.innerHTML = `<option value="">اختر موظفاً</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+        if (advanceFilterEmp) advanceFilterEmp.innerHTML = `<option value="all">الكل</option>` + filteredEmps.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
     }
-    
+
     populateEmployeeSelects();
-    
+
     // عند تغيير الفرع في التعقيب اليومي، تحديث قوائم الموظفين
     const dailyBranchEl = document.getElementById('dailyBranch');
     if (dailyBranchEl) {
-        dailyBranchEl.onchange = function() {
+        dailyBranchEl.onchange = function () {
             populateEmployeeSelects();
         };
     }
@@ -1414,7 +1499,10 @@ function renderAll() {
         if (el) el.disabled = !canModifySettings;
     });
 
-    const dailyControls = ['dailyBranch', 'dailyEmp', 'dailyDate', 'dailyStatus', 'dailyValue', 'dailyNotes', 'btnSaveDaily', 'extraEmp', 'extraDate', 'extraAmount', 'extraNotes', 'btnSaveExtra'];
+    // تعديل جديد: إضافة حقول السلف إلى عناصر التحكم الخاصة بصلاحيات التعقيب اليومي.
+    // الكود الأصلي معطل:
+    // const dailyControls = ['dailyBranch', 'dailyEmp', 'dailyDate', 'dailyStatus', 'dailyValue', 'dailyNotes', 'btnSaveDaily', 'extraEmp', 'extraDate', 'extraAmount', 'extraNotes', 'btnSaveExtra'];
+    const dailyControls = ['dailyBranch', 'dailyEmp', 'dailyDate', 'dailyStatus', 'dailyValue', 'dailyNotes', 'btnSaveDaily', 'extraEmp', 'extraDate', 'extraAmount', 'extraNotes', 'btnSaveExtra', 'advanceEmp', 'advanceDate', 'advanceAmount', 'advanceNotes', 'btnSaveAdvance'];
     dailyControls.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.disabled = !canModifyDaily;
@@ -1429,6 +1517,8 @@ function renderAll() {
     renderUsers();
     renderDailyFollowups();
     renderDailyExtras();
+    // تعديل جديد: رسم جدول السلف مع بقية جداول التعقيب اليومي.
+    renderDailyAdvances();
     renderArchiveReports();
     renderSentReports();
     renderHolidays();
@@ -1436,10 +1526,10 @@ function renderAll() {
     renderShiftPeriods();
     renderReportTable();
     enableTableSorting();
-    
+
     // Enable search on all selects after rendering
     setTimeout(enableSearchableSelects, 100);
-    
+
     // Enable column toggle for main and report tables
     setTimeout(enableColumnToggleForAllTables, 200);
 }
@@ -1527,27 +1617,27 @@ const MAX_DATE_RANGE_CALENDAR_DAYS = 31; // أقصى نطاق مسموح به ب
 function validateMainDateRange(from, to) {
     // إذا كان أحد التاريخين فارغاً، لا داعي للتحقق
     if (!from || !to) return { from, to };
-    
+
     const fromDate = new Date(from);
     const toDate = new Date(to);
-    
+
     // حساب الفرق بالأيام (بالأيام التقويمية، وليس أيام العمل)
     const diffTime = Math.abs(toDate - fromDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     // إذا تجاوز النطاق الشهر (31 يوم)، نقوم بقص التاريخ "إلى" وجعله 31 يوماً فقط
     if (diffDays > MAX_DATE_RANGE_CALENDAR_DAYS) {
         // حساب التاريخ الجديد: من + 31 يوم
         const newToDate = new Date(fromDate);
         newToDate.setDate(newToDate.getDate() + MAX_DATE_RANGE_CALENDAR_DAYS);
         const newTo = newToDate.toISOString().split('T')[0];
-        
+
         // تنبيه المستخدم - هذا هو التعديل على السلوك الأصلي
         alert(`⚠️ تم تحديد نطاق تاريخ ${diffDays} يوم، وهو يتجاوز الحد الأقصى المسموح به (شهر واحد = ${MAX_DATE_RANGE_CALENDAR_DAYS} يوم).\nتم تقليص التاريخ "إلى" تلقائياً إلى ${newTo}.`);
-        
+
         return { from, to: newTo };
     }
-    
+
     return { from, to };
 }
 
@@ -1564,12 +1654,12 @@ function renderMainTable() {
     // ===== التعديل الجديد: التحقق من نطاق التاريخ (الحد الأقصى شهر واحد) =====
     // الكود الأصلي: كان يستخدم from و to مباشرة دون تحقق من النطاق
     // if (from && to) { ... } - لم يكن هناك تحقق
-    
+
     // تطبيق التحقق على نطاق التاريخ
     const validatedRange = validateMainDateRange(from, to);
     from = validatedRange.from;
     to = validatedRange.to;
-    
+
     // تحديث حقول التاريخ بالقيم المعدلة (إن وجد تعديل)
     if (from !== document.getElementById('filterFrom').value) {
         document.getElementById('filterFrom').value = from;
@@ -1585,51 +1675,57 @@ function renderMainTable() {
     const headerRow = document.getElementById('mainTableHeaderRow');
     const dateRange = getWorkingDatesBetween(from, to, 31);
     const workingDates = dateRange.length > 0 ? dateRange : [new Date().toISOString().split('T')[0]];
-    
+
     if (headerRow) {
         // إزالة الخلايا الديناميكية القديمة إن وجدت
         const existingDynamicCells = headerRow.querySelectorAll('.dyn-date-cell');
         existingDynamicCells.forEach(cell => cell.remove());
-        
-            // إضافة الخلايا الجديدة بعد عمود "الأيام المتوقعة" وقبل عمود "أيام الغياب"
-            // تم التعديل: index 6 بدلاً من 5 بسبب إضافة عمود "م"
-            const insertBeforeCell = headerRow.children[6]; // العمود "أيام الغياب" (index 6)
-            workingDates.forEach((dateStr, idx) => {
-                const th = document.createElement('th');
-                th.className = 'dyn-date-cell dyn-date'; // dyn-date للتوافق مع makeTableSortable
-                // استخراج رقم اليوم والشهر من السلسلة النصية مباشرة لتجنب مشاكل التوقيت (timezone)
-                const parts = dateStr.split('-'); // YYYY-MM-DD
-                const year = parseInt(parts[0], 10);
-                const month = parseInt(parts[1], 10) - 1; // 0-indexed
-                const day = parseInt(parts[2], 10);
-                const dateObj = new Date(year, month, day); // Local timezone
-                // عرض اسم اليوم (رمز الأيام) + التاريخ
-                const dayName = getDayName(dateStr, true);
-                th.innerText = `${dateObj.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })} ${dayName}`;
-                th.dataset.date = dateStr;
+
+        // تعديل جديد: بعد نقل "الأجر اليومي" وإضافة "اجمالي المبلغ المتوقع"،
+        // أصبحت أعمدة التاريخ تبدأ قبل عمود "أيام الغياب" عند index 8.
+        // الكود الأصلي معطل: كان يستخدم index 6 قبل إضافة الأعمدة الجديدة.
+        // const insertBeforeCell = headerRow.children[6]; // العمود "أيام الغياب" سابقاً
+        const insertBeforeCell = headerRow.children[8]; // العمود "أيام الغياب" بعد التعديل
+        workingDates.forEach((dateStr, idx) => {
+            const th = document.createElement('th');
+            th.className = 'dyn-date-cell dyn-date'; // dyn-date للتوافق مع makeTableSortable
+            // استخراج رقم اليوم والشهر من السلسلة النصية مباشرة لتجنب مشاكل التوقيت (timezone)
+            const parts = dateStr.split('-'); // YYYY-MM-DD
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; // 0-indexed
+            const day = parseInt(parts[2], 10);
+            const dateObj = new Date(year, month, day); // Local timezone
+            // عرض اسم اليوم (رمز الأيام) + التاريخ
+            const dayName = getDayName(dateStr, true);
+            th.innerText = `${dateObj.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long' })} ${dayName}`;
+            th.dataset.date = dateStr;
             th.style.cursor = 'pointer';
             th.style.userSelect = 'none';
             th.title = 'انقر للفرز';
-            
+
             // إضافة سهم الفرز
             const arrow = document.createElement('span');
             arrow.className = 'sort-arrow';
             arrow.style.cssText = 'margin-right:4px;font-size:11px;color:#888;';
             arrow.textContent = ' ⇅';
             th.appendChild(arrow);
-            
+
             // إدراج الخلية قبل العمود الثابت "أيام الغياب" لضمان ترتيب تصاعدي صحيح
             if (insertBeforeCell && headerRow) {
                 headerRow.insertBefore(th, insertBeforeCell);
             }
         });
     }
-    
+
     // حساب العدد الإجمالي للأعمدة (لـ colspan)
-    // الكود الأصلي: TOTAL_BASE_COLS_BEFORE = 5 (رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة)
-    // تم التعديل: إضافة عمود "م" في البداية
-    const TOTAL_BASE_COLS_BEFORE = 6; // م, رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة
-    const TOTAL_BASE_COLS_AFTER = 7;  // الغياب, الإجازات, الفعلية, الأجر, الإضافي, الصافي, الإجراءات
+    // الكود الأصلي معطل:
+    // const TOTAL_BASE_COLS_BEFORE = 6; // م, رقم الموظف, الاسم, الفرع, الرصيد, المتوقعة
+    // const TOTAL_BASE_COLS_AFTER = 7;  // الغياب, الإجازات, الفعلية, الأجر, الإضافي, الصافي, الإجراءات
+    // تعديل جديد: نقل "الأجر اليومي" قبل الأيام المتوقعة، وإضافة "اجمالي المبلغ المتوقع".
+    // الكود الأصلي معطل بعد إضافة عمودي "اجمالي المبلغ الفعلي" و"السلف":
+    // const TOTAL_BASE_COLS_AFTER = 6;  // الغياب, الإجازات, الفعلية, الإضافي, الصافي, الإجراءات
+    const TOTAL_BASE_COLS_BEFORE = 8; // م, رقم الموظف, الاسم, الفرع, الرصيد, الأجر, المتوقعة, إجمالي المتوقع
+    const TOTAL_BASE_COLS_AFTER = 9;  // الغياب, الإجازات, الإجازة الأخرى, الفعلية, إجمالي الفعلي, السلف, الإضافي, الصافي, الإجراءات
     const totalCols = TOTAL_BASE_COLS_BEFORE + workingDates.length + TOTAL_BASE_COLS_AFTER;
     // ===== نهاية التعديل =====
 
@@ -1656,10 +1752,15 @@ function renderMainTable() {
     let totalExpectedAll = 0;
     let totalAbsenceAll = 0;
     let totalAnnualAll = 0;
+    let totalOtherLeaveAll = 0;
     let totalActualAll = 0;
+    let totalExpectedAmountAll = 0;
+    let totalActualAmountAll = 0;
+    let totalAdvancesAll = 0;
     let totalNetAll = 0;
     const dateAbsenceCounts = workingDates.map(() => 0);
     const dateAnnualCounts = workingDates.map(() => 0);
+    const dateOtherLeaveCounts = workingDates.map(() => 0);
 
     // الإجازات في النطاق
     const holidaysInRange = db.holidays.filter(h => h.date >= from && h.date <= to).map(h => h.date);
@@ -1669,10 +1770,14 @@ function renderMainTable() {
         const branchName = db.branches.find(b => b.id === emp.branchId)?.name || '';
         const expectedDays = workingDates.length;
         const dayWage = parseFloat(emp.wage) || 0;
+        // تعديل جديد: إجمالي المبلغ المتوقع = الأيام المتوقعة × الأجر اليومي.
+        // الكود الأصلي لم يكن يحتوي على هذا العمود أو هذا الحساب.
+        const expectedAmount = expectedDays * dayWage;
 
         // حساب الغياب والإجازات من خلايا التاريخ (نفس مصدر getDailyStatusArray)
         let totalAbsenceDays = 0;
         let totalAnnualDays = 0;
+        let totalOtherLeaveDays = 0;
 
         // أيام المناسبات
         let holidaysPresent = 0;
@@ -1687,29 +1792,31 @@ function renderMainTable() {
             if (!d) { dateColsHtml += '<td></td>'; return; }
             const statusArr = getDailyStatusArray(emp, d);
             const N = statusArr.length || 1;
-            let absentCount = 0, annualCount = 0, holidayCount = 0;
-            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'holiday_present') holidayCount++; });
-            
+            let absentCount = 0, annualCount = 0, otherLeaveCount = 0, holidayCount = 0;
+            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'other_leave') otherLeaveCount++; if (s === 'holiday_present') holidayCount++; });
+
             if (holidayCount === N) {
                 dateColsHtml += `<td class="state-holiday">0م</td>`;
             } else {
-                // حساب قيم الغياب والإجازات من الحالة الفعلية
+                // حساب قيم الغياب والإجازات والإجازات الأخرى من الحالة الفعلية
                 const absenceVal = absentCount / N;
                 const annualVal = annualCount / N;
-                const totalVal = absenceVal + annualVal;
-                
+                const otherLeaveVal = otherLeaveCount / N;
+                const totalVal = absenceVal + annualVal + otherLeaveVal;
+
                 // تجميع الإجماليات لكل موظف (نفس مصدر خلايا التاريخ)
                 totalAbsenceDays += absenceVal;
                 totalAnnualDays += annualVal;
-                
+                totalOtherLeaveDays += otherLeaveVal;
+
                 if (totalVal > 0) {
                     let displayParts = '';
                     let cellClass = '';
-                    if (absenceVal > 0 && annualVal === 0) {
+                    if (absenceVal > 0 && annualVal === 0 && otherLeaveVal === 0) {
                         cellClass = 'state-absent';
-                    } else if (annualVal > 0 && absenceVal === 0) {
+                    } else if ((annualVal > 0 || otherLeaveVal > 0) && absenceVal === 0) {
                         cellClass = 'state-annual';
-                    } else if (absenceVal > 0 && annualVal > 0) {
+                    } else if (absenceVal > 0) {
                         cellClass = 'state-absent';
                     }
                     if (absenceVal > 0) {
@@ -1718,9 +1825,13 @@ function renderMainTable() {
                     if (annualVal > 0) {
                         displayParts += (displayParts ? ' ' : '') + (Number.isInteger(annualVal) ? `${annualVal}س` : `${annualVal.toFixed(1)}س`);
                     }
+                    if (otherLeaveVal > 0) {
+                        displayParts += (displayParts ? ' ' : '') + (Number.isInteger(otherLeaveVal) ? `${otherLeaveVal}أ` : `${otherLeaveVal.toFixed(1)}أ`);
+                    }
                     dateColsHtml += `<td class="${cellClass}">${displayParts}</td>`;
                     dateAbsenceCounts[idx] += absenceVal;
                     dateAnnualCounts[idx] += annualVal;
+                    dateOtherLeaveCounts[idx] += otherLeaveVal;
                 } else {
                     dateColsHtml += `<td class="state-present">0ح</td>`;
                 }
@@ -1728,15 +1839,27 @@ function renderMainTable() {
         });
 
         // الأيام الفعلية = المتوقعة - الغياب - الإجازات المستنفذه + المناسبات
-        const actualDays = Math.max(0, expectedDays - totalAbsenceDays - totalAnnualDays + holidaysPresent);
+        const actualDays = Math.max(0, expectedDays - totalAbsenceDays - totalAnnualDays - totalOtherLeaveDays + holidaysPresent);
         const extras = (db.dailyExtras || []).filter(x => x.empId === emp.id && x.date >= from && x.date <= to);
         const totalExtra = extras.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
-        const salary = actualDays * dayWage + totalExtra;
+        // تعديل جديد: إجمالي المبلغ الفعلي = الأيام الفعلية × الأجر اليومي.
+        // الكود الأصلي كان يحسب الصافي مباشرة من actualDays * dayWage + totalExtra.
+        const actualAmount = actualDays * dayWage;
+        const advances = (db.dailyAdvances || []).filter(x => x.empId === emp.id && x.date >= from && x.date <= to);
+        const totalAdvance = advances.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
+        // الكود الأصلي معطل:
+        // const salary = actualDays * dayWage + totalExtra;
+        // تعديل جديد: السلف تخصم من إجمالي المبلغ الفعلي، والإضافي يضاف للصافي.
+        const salary = actualAmount + totalExtra - totalAdvance;
 
         totalExpectedAll += expectedDays;
+        totalExpectedAmountAll += expectedAmount;
         totalAbsenceAll += totalAbsenceDays;
         totalAnnualAll += totalAnnualDays;
+        totalOtherLeaveAll += totalOtherLeaveDays;
         totalActualAll += actualDays;
+        totalActualAmountAll += actualAmount;
+        totalAdvancesAll += totalAdvance;
         totalNetAll += salary;
 
         tbody.innerHTML += `
@@ -1746,12 +1869,22 @@ function renderMainTable() {
                 <td>${emp.name}</td>
                 <td>${branchName}</td>
                 <td dir="ltr" style="color:${emp.leaveBalance < 5 ? 'red' : 'green'}">${emp.leaveBalance}</td>
+                <!-- تعديل جديد: تم نقل الأجر اليومي إلى هنا بعد رصيد الإجازات -->
+                <td>${dayWage.toLocaleString()}</td>
                 <td>${expectedDays}</td>
+                <!-- تعديل جديد: عمود إجمالي المبلغ المتوقع -->
+                <td style="font-weight:bold; background:#f7fbff;">${expectedAmount.toLocaleString()}</td>
                 ${dateColsHtml}
                 <td style="color:red; font-weight:bold;">${totalAbsenceDays}</td>
                 <td style="color:#e67e22; font-weight:bold;">${totalAnnualDays}</td>
+                <td style="color:#8e44ad; font-weight:bold;">${totalOtherLeaveDays}</td>
                 <td style="color:green; font-weight:bold;">${actualDays}</td>
-                <td>${dayWage.toLocaleString()}</td>
+                <!-- تعديل جديد: عمود إجمالي المبلغ الفعلي بعد الأيام الفعلية -->
+                <td style="font-weight:bold; background:#f1fff6;">${actualAmount.toLocaleString()}</td>
+                <!-- تعديل جديد: عمود السلف، ويخصم من الصافي -->
+                <td style="font-weight:bold; color:#c0392b;">${totalAdvance.toLocaleString()}</td>
+                <!-- الكود الأصلي معطل: كان الأجر اليومي يظهر هنا بعد الأيام الفعلية -->
+                <!-- <td>${dayWage.toLocaleString()}</td> -->
                 <td style="font-weight:bold;">${totalExtra.toLocaleString()}</td>
                 <td style="font-weight:bold; background:#e8f8f5;">${salary.toLocaleString()}</td>
                 <td class="no-print">
@@ -1777,12 +1910,19 @@ function renderMainTable() {
         <tr style="font-weight:bold; background:#f0f0f0;">
             <td></td>
             <td colspan="4">المجموع</td>
+            <!-- تعديل جديد: ترك خانة الأجر اليومي فارغة في صف المجموع لأنه حقل فردي لكل موظف -->
+            <td></td>
             <td>${totalExpectedAll}</td>
+            <td style="background:#f7fbff;">${totalExpectedAmountAll.toLocaleString()}</td>
             ${dynTotalsCells}
             <td style="color:red;">${totalAbsenceAll}</td>
             <td style="color:#e67e22;">${totalAnnualAll}</td>
+            <td style="color:#8e44ad;">${totalOtherLeaveAll}</td>
             <td style="color:green;">${totalActualAll}</td>
-            <td></td>
+            <td style="background:#f1fff6;">${totalActualAmountAll.toLocaleString()}</td>
+            <td style="color:#c0392b;">${totalAdvancesAll.toLocaleString()}</td>
+            <!-- الكود الأصلي معطل: كانت هذه الخانة الفارغة لموضع الأجر اليومي القديم -->
+            <!-- <td></td> -->
             <td>${db.dailyExtras.filter(x => x.date >= from && x.date <= to && filtered.some(emp => emp.id === x.empId)).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0).toLocaleString()}</td>
             <td style="background:#e8f8f5;">${totalNetAll.toLocaleString()}</td>
             <td class="no-print"></td>
@@ -1814,13 +1954,13 @@ function reportMonthChanged() {
     const year = parseInt(document.getElementById('reportYear').value);
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
-    
+
     const fromStr = firstDay.toISOString().split('T')[0];
     const toStr = lastDay.toISOString().split('T')[0];
-    
+
     document.getElementById('reportFrom').value = fromStr;
     document.getElementById('reportTo').value = toStr;
-    
+
     renderReportTable();
 }
 
@@ -1841,13 +1981,13 @@ function reportDateChanged() {
 function printReportTable() {
     const table = document.querySelector('#report-panel .table-wrapper table');
     if (!table) return alert('لا يوجد جدول للطباعة');
-    
+
     const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
     const monthIdx = parseInt(document.getElementById('reportMonth').value) - 1;
     const year = document.getElementById('reportYear').value;
     const monthName = monthNames[monthIdx] || '';
     const title = `تقرير الإجازات خلال شهر ${monthName} ${year}`;
-    
+
     const companyName = db.settings.companyName || '';
     const logoUrl = db.settings.logo || '';
     const logoHtml = logoUrl
@@ -1856,7 +1996,7 @@ function printReportTable() {
 
     const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
     const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-    
+
     const paperSizeStyles = {
         'A4': { width: '210mm', height: '297mm' },
         'A5': { width: '148mm', height: '210mm' },
@@ -1888,7 +2028,7 @@ function printReportTable() {
     if (originalThead) {
         columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
     }
-    
+
     const headerRowHtml = `<tr style="display:table-row;">
         <td colspan="${colCount}" style="text-align:center;border:0!important;padding:0!important;">
             ${logoHtml}
@@ -1896,7 +2036,7 @@ function printReportTable() {
             <div style="font-size:14px;font-weight:bold;margin:2px 0;">${title}</div>
         </td>
     </tr>`;
-    
+
     const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
@@ -1933,19 +2073,19 @@ function printReportTable() {
         printFrame.style.width = '0';
         printFrame.style.height = '0';
         document.body.appendChild(printFrame);
-        
+
         const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(printContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch(e) { window.print(); }
+            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
             setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
         }, 500);
         return;
     }
-    
+
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
@@ -1956,17 +2096,17 @@ function printReportTable() {
 function previewReportTable() {
     const table = document.querySelector('#report-panel .table-wrapper table');
     if (!table) { alert('لا يوجد جدول للطباعة'); return; }
-    
+
     // حفظ عنوان التقرير في عنصر printTitle قبل فتح المعاينة
     const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
     const monthIdx = parseInt(document.getElementById('reportMonth').value) - 1;
     const year = document.getElementById('reportYear').value;
     const monthName = monthNames[monthIdx] || '';
     const title = `تقرير الإجازات خلال شهر ${monthName} ${year}`;
-    
+
     const printTitleEl = document.getElementById('printTitle');
     if (printTitleEl) printTitleEl.innerText = title;
-    
+
     document.getElementById('printPreviewModal').style.display = 'block';
     // استخدام updatePrintPreview بعد تعديل العنوان
     updatePrintPreviewWithTitle(title);
@@ -1977,16 +2117,16 @@ function updatePrintPreviewWithTitle(customTitle) {
     try {
         const paperSize = document.getElementById('previewPaperSize').value;
         const orientation = document.getElementById('previewOrientation').value;
-        
+
         localStorage.setItem('tageep_paper_size', paperSize);
         localStorage.setItem('tageep_orientation', orientation);
-        
+
         const table = document.querySelector('#report-panel .table-wrapper table');
         if (!table) return;
-        
+
         const companyName = db.settings.companyName || '';
         const logoUrl = db.settings.logo || '';
-        
+
         const tableClone = table.cloneNode(true);
         // إزالة أيقونات العين (👁️) من الطباعة
         tableClone.querySelectorAll('.col-toggle-btn').forEach(el => el.remove());
@@ -1997,16 +2137,16 @@ function updatePrintPreviewWithTitle(customTitle) {
                 lastCell.remove();
             }
         });
-        
+
         const firstRow = tableClone.querySelector('tr');
         const colCount = firstRow ? firstRow.cells.length : 1;
-        
+
         const originalThead = tableClone.querySelector('thead');
         let columnHeadersHtml = '';
         if (originalThead) {
             columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
         }
-        
+
         const logoHtml = logoUrl
             ? `<img src="${logoUrl}" style="width:100%;height:auto;object-fit:fill;display:block;margin:0;padding:0;" alt="شعار الشركة">`
             : '';
@@ -2016,25 +2156,25 @@ function updatePrintPreviewWithTitle(customTitle) {
                 <div style="font-size:14px;font-weight:bold;margin:2px 0;">${customTitle}</div>
             </td>
         </tr>`;
-        
+
         const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
-        
+
         const tableHtml = tableClone.outerHTML;
         const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
-        
+
         const paperSizeStyles = {
             'A4': { width: '210mm', height: '297mm' },
             'A5': { width: '148mm', height: '210mm' },
             'Letter': { width: '216mm', height: '279mm' },
             'Legal': { width: '216mm', height: '356mm' }
         };
-        
+
         const selectedSize = paperSizeStyles[paperSize] || paperSizeStyles['A4'];
         const isPortrait = orientation === 'portrait';
         const fontSize = isPortrait ? '7px' : '10px';
         const cellPadding = isPortrait ? '1.5px 2px' : '4px 5px';
         const headerFontSize = isPortrait ? '9px' : '11px';
-        
+
         const printStyles = `
             <style>
                 @page { 
@@ -2082,7 +2222,7 @@ function updatePrintPreviewWithTitle(customTitle) {
                 }
             </style>
         `;
-        
+
         const previewContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -2095,21 +2235,21 @@ function updatePrintPreviewWithTitle(customTitle) {
     ${finalHtml}
 </body>
 </html>`;
-        
+
         const previewFrame = document.createElement('iframe');
         previewFrame.style.width = '100%';
         previewFrame.style.height = '600px';
         previewFrame.style.border = 'none';
-        
+
         const previewContentDiv = document.getElementById('printPreviewContent');
         previewContentDiv.innerHTML = '';
         previewContentDiv.appendChild(previewFrame);
-        
+
         const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(previewContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
             try {
                 const iframeBody = previewFrame.contentDocument.body;
@@ -2150,7 +2290,7 @@ function renderReportTable() {
     if (headerRow) {
         const existingDynamicCells = headerRow.querySelectorAll('.dyn-date-cell');
         existingDynamicCells.forEach(cell => cell.remove());
-        
+
         // إدراج الأعمدة قبل عمود "أيام الحضور" (index 7 بسبب إضافة عمود "م")
         const insertBeforeCell = headerRow.children[7];
         workingDates.forEach((dateStr) => {
@@ -2186,11 +2326,11 @@ function renderReportTable() {
     const year = document.getElementById('reportYear')?.value || '';
     const monthName = monthNames[monthIdx] || '';
     const reportTitle = `تقرير الإجازات خلال شهر ${monthName} ${year}`;
-    
+
     // تحديث عنوان التقرير في واجهة التقرير للطباعة
     const printTitleEl = document.getElementById('printTitle');
     if (printTitleEl) printTitleEl.innerText = reportTitle;
-    
+
     if (dateRangeEl) {
         dateRangeEl.innerText = `${reportTitle} (من ${from || '? '} إلى ${to || '? '})`;
     }
@@ -2199,10 +2339,12 @@ function renderReportTable() {
     let totalExpectedAll = 0;
     let totalAbsenceAll = 0;
     let totalAnnualAll = 0;
+    let totalOtherLeaveAll = 0;
     let totalActualAll = 0;
     let totalNetAll = 0;
     const dateAbsenceCounts = workingDates.map(() => 0);
     const dateAnnualCounts = workingDates.map(() => 0);
+    const dateOtherLeaveCounts = workingDates.map(() => 0);
 
     filtered.forEach((emp, rowIdx) => {
         const rowNum = rowIdx + 1;
@@ -2211,12 +2353,13 @@ function renderReportTable() {
         const totals = getAbsenceTotalsForEmployee(emp, from, to);
         const absenceDays = totals.absenceDays;
         const annualUsed = totals.annualDays;
+        const otherLeaveUsed = totals.otherLeaveDays;
         const holidayPresent = totals.holidayPresent;
         const leaveBalance = parseFloat(emp.leaveBalance) || 0;
         const remainingBalance = Math.max(0, leaveBalance);
         const expectedDays = workingDates.length;
-        // أيام الحضور = المتوقعة - الغياب - الإجازات السنوية + المناسبات (نفس التعقيب الرئيسي)
-        const actualDays = Math.max(0, expectedDays - absenceDays - annualUsed + holidayPresent);
+        // أيام الحضور = المتوقعة - الغياب - الإجازات السنوية - الإجازة الأخرى + المناسبات (نفس التعقيب الرئيسي)
+        const actualDays = Math.max(0, expectedDays - absenceDays - annualUsed - otherLeaveUsed + holidayPresent);
         const extras = (db.dailyExtras || []).filter(x => x.empId === emp.id && x.date >= from && x.date <= to);
         const totalExtra = extras.reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0);
         const dayWage = parseFloat(emp.wage) || 0;
@@ -2225,6 +2368,7 @@ function renderReportTable() {
         totalExpectedAll += expectedDays;
         totalAbsenceAll += absenceDays;
         totalAnnualAll += annualUsed;
+        totalOtherLeaveAll += otherLeaveUsed;
         totalActualAll += actualDays;
         totalNetAll += salary;
 
@@ -2233,12 +2377,13 @@ function renderReportTable() {
             if (!d) return;
             const statusArr = getDailyStatusArray(emp, d);
             const N = statusArr.length || 1;
-            let absentCount = 0, annualCount = 0, holidayCount = 0;
-            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'holiday_present') holidayCount++; });
+            let absentCount = 0, annualCount = 0, otherLeaveCount = 0, holidayCount = 0;
+            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'other_leave') otherLeaveCount++; if (s === 'holiday_present') holidayCount++; });
             const holidaysSet = new Set((db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date));
             if (!(holidayCount === N && holidaysSet.has(d))) {
                 dateAbsenceCounts[idx] += absentCount / N;
                 dateAnnualCounts[idx] += annualCount / N;
+                dateOtherLeaveCounts[idx] += otherLeaveCount / N;
             }
         });
 
@@ -2266,8 +2411,8 @@ function renderReportTable() {
             if (!d) { dateColsHtml += '<td></td>'; return; }
             const statusArr = getDailyStatusArray(emp, d);
             const N = statusArr.length || 1;
-            let absentCount = 0, annualCount = 0, holidayCount = 0;
-            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'holiday_present') holidayCount++; });
+            let absentCount = 0, annualCount = 0, otherLeaveCount = 0, holidayCount = 0;
+            statusArr.forEach(s => { if (s === 'absent') absentCount++; if (s === 'annual') annualCount++; if (s === 'other_leave') otherLeaveCount++; if (s === 'holiday_present') holidayCount++; });
 
             const holidaysSet = new Set((db.holidays || []).filter(h => h.date >= from && h.date <= to).map(h => h.date));
             if (holidayCount === N && holidaysSet.has(d)) {
@@ -2275,15 +2420,16 @@ function renderReportTable() {
             } else {
                 const absenceVal = absentCount / N;
                 const annualVal = annualCount / N;
-                const totalVal = absenceVal + annualVal;
+                const otherLeaveVal = otherLeaveCount / N;
+                const totalVal = absenceVal + annualVal + otherLeaveVal;
                 if (totalVal > 0) {
                     let displayParts = '';
                     let cellClass = '';
-                    if (absenceVal > 0 && annualVal === 0) {
+                    if (absenceVal > 0 && annualVal === 0 && otherLeaveVal === 0) {
                         cellClass = 'state-absent';
-                    } else if (annualVal > 0 && absenceVal === 0) {
+                    } else if ((annualVal > 0 || otherLeaveVal > 0) && absenceVal === 0) {
                         cellClass = 'state-annual';
-                    } else if (absenceVal > 0 && annualVal > 0) {
+                    } else if (absenceVal > 0) {
                         cellClass = 'state-absent';
                     }
                     if (absenceVal > 0) {
@@ -2291,6 +2437,9 @@ function renderReportTable() {
                     }
                     if (annualVal > 0) {
                         displayParts += (displayParts ? ' ' : '') + (Number.isInteger(annualVal) ? `${annualVal}س` : `${annualVal.toFixed(1)}س`);
+                    }
+                    if (otherLeaveVal > 0) {
+                        displayParts += (displayParts ? ' ' : '') + (Number.isInteger(otherLeaveVal) ? `${otherLeaveVal}أ` : `${otherLeaveVal.toFixed(1)}أ`);
                     }
                     dateColsHtml += `<td class="${cellClass}">${displayParts}</td>`;
                 } else {
@@ -2312,6 +2461,7 @@ function renderReportTable() {
                 <td>${actualDays}</td>
                 <td>${absenceDays}</td>
                 <td>${annualUsed}</td>
+                <td>${otherLeaveUsed}</td>
                 <td>${remainingBalance}</td>
                 <td>${holidayPresent}</td>
                 <td>${totalExtra.toLocaleString()}</td>
@@ -2341,6 +2491,7 @@ function renderReportTable() {
             <td style="color:green;">${totalActualAll}</td>
             <td style="color:red;">${totalAbsenceAll}</td>
             <td style="color:#e67e22;">${totalAnnualAll}</td>
+            <td style="color:#8e44ad;">${totalOtherLeaveAll}</td>
             <td></td>
             <td></td>
             <td>${db.dailyExtras.filter(x => x.date >= from && x.date <= to && filtered.some(emp => emp.id === x.empId)).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0).toLocaleString()}</td>
@@ -2439,10 +2590,10 @@ function renderEmployees() {
 
 function printEmployeesTable() {
     if (!canPerform('employees', 'view')) return alert('ليس لديك صلاحية لعرض الموظفين');
-    
+
     const empTable = document.querySelector('#tab-employees .table-wrapper table');
     if (!empTable) return alert('لا يوجد جدول للطباعة');
-    
+
     const companyName = db.settings.companyName || '';
     const logoUrl = db.settings.logo || '';
     const logoHtml = logoUrl
@@ -2451,7 +2602,7 @@ function printEmployeesTable() {
 
     const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
     const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-    
+
     const paperSizeStyles = {
         'A4': { width: '210mm', height: '297mm' },
         'A5': { width: '148mm', height: '210mm' },
@@ -2480,7 +2631,7 @@ function printEmployeesTable() {
     if (originalThead) {
         columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
     }
-    
+
     const headerRowHtml = `<tr style="display:table-row;">
         <td colspan="${colCount}" style="text-align:center;border:0!important;padding:0!important;">
             ${logoHtml}
@@ -2488,7 +2639,7 @@ function printEmployeesTable() {
             <div style="font-size:14px;font-weight:bold;margin:2px 0;">كشف بيانات الموظفين</div>
         </td>
     </tr>`;
-    
+
     const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
@@ -2525,19 +2676,19 @@ function printEmployeesTable() {
         printFrame.style.width = '0';
         printFrame.style.height = '0';
         document.body.appendChild(printFrame);
-        
+
         const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(printContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch(e) { window.print(); }
+            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
             setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
         }, 500);
         return;
     }
-    
+
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
@@ -3004,7 +3155,7 @@ function editDailyEntry(id) {
     if (!canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لتعديل سجلات التعقيب اليومي');
     const entry = db.dailyFollowUps.find(x => x.id === id);
     if (!entry) return alert('السجل غير موجود');
-    
+
     document.getElementById('dailyEditId').value = entry.id;
     document.getElementById('dailyBranch').value = entry.branchId;
     document.getElementById('dailyEmp').value = entry.empId;
@@ -3012,7 +3163,7 @@ function editDailyEntry(id) {
     document.getElementById('dailyStatus').value = entry.statusType;
     const notesEl = document.getElementById('dailyNotes');
     if (notesEl) notesEl.value = entry.notes || '';
-    
+
     // تعبئة حقل الفترة (القيمة)
     const periodVal = entry.period || entry.value || 'all';
     // محاولة تعبئة حقل dailyPeriod إن وجد
@@ -3024,11 +3175,11 @@ function editDailyEntry(id) {
         const valueEl = document.getElementById('dailyValue');
         if (valueEl) valueEl.value = periodVal;
     }
-    
+
     // تغيير نص زر الحفظ
     const btnSave = document.getElementById('btnSaveDaily');
     if (btnSave) btnSave.innerText = 'تحديث التعقيب اليومي';
-    
+
     // التبديل إلى لوحة التعقيب اليومي لإظهار البيانات
     switchDailyPanel('daily-followup-panel');
 }
@@ -3045,11 +3196,25 @@ function saveDailyEntry() {
     const period = periodEl ? periodEl.value : 'all';
     const notes = document.getElementById('dailyNotes').value.trim();
     if (!empId || !branchId || !date) return alert('أكمل بيانات التعقيب اليومي');
+    if (statusType === 'other_leave' && !notes) return alert('يرجى كتابة ملاحظات نوع الإجازة الأخرى مثل: مرضية أو وفاة أو زواج');
     if (id && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لتعديل سجل التعقيب اليومي');
     if (!id && !canPerform('daily', 'add')) return alert('ليس لديك صلاحية لإضافة سجل التعقيب اليومي');
     const duplicateDaily = db.dailyFollowUps.find(x => x.empId === empId && x.date === date && x.period === period && x.id !== id);
     if (duplicateDaily) return alert('يوجد تعقيب لنفس الموظف، نفس التاريخ ونفس الفترة مسبقاً');
-    let entry = { id: id || 'd' + Date.now(), empId, branchId, date, statusType, period, notes, createdAt: new Date().toISOString() };
+
+    const emp = findEmployeeById(empId);
+    const oldEntry = id ? db.dailyFollowUps.find(x => x.id === id) : null;
+    const oldValue = oldEntry && oldEntry.statusType === 'annual' ? getLeaveDeductionValue(oldEntry.statusType, oldEntry.period) : 0;
+    const newValue = getLeaveDeductionValue(statusType, period);
+
+    if (oldEntry && oldEntry.statusType === 'annual' && emp) {
+        emp.leaveBalance = parseFloat(emp.leaveBalance || 0) + oldValue;
+    }
+    if (statusType === 'annual' && emp) {
+        emp.leaveBalance = Math.max(0, parseFloat(emp.leaveBalance || 0) - newValue);
+    }
+
+    let entry = { id: id || 'd' + Date.now(), empId, branchId, date, statusType, period, notes, value: newValue, createdAt: new Date().toISOString() };
     if (id) {
         const idx = db.dailyFollowUps.findIndex(x => x.id === id);
         if (idx !== -1) db.dailyFollowUps[idx] = entry;
@@ -3173,6 +3338,102 @@ function deleteDailyExtra(id) {
     saveDB();
 }
 
+// ========== Daily Advances ==========
+// تعديل جديد: قسم السلف مبني بنفس فكرة قسم الإضافي.
+// الكود الأصلي معطل: لم يكن يحتوي على render/save/edit/delete للسلف.
+function renderDailyAdvances() {
+    const tbody = document.getElementById('advanceTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const branchId = document.getElementById('dailyFilterBranch')?.value || 'all';
+    const empId = document.getElementById('advanceFilterEmp')?.value || 'all';
+    const from = document.getElementById('advanceFilterFrom')?.value || '';
+    const to = document.getElementById('advanceFilterTo')?.value || '';
+    const canEdit = canPerform('daily', 'edit');
+    const canDelete = canPerform('daily', 'delete');
+
+    const filtered = (db.dailyAdvances || []).filter(item => {
+        const employee = db.employees.find(e => e.id === item.empId) || { branchId: 'all' };
+        return (branchId === 'all' || employee.branchId === branchId)
+            && (empId === 'all' || item.empId === empId)
+            && (!from || item.date >= from)
+            && (!to || item.date <= to);
+    });
+
+    filtered.forEach(item => {
+        const employee = db.employees.find(e => e.id === item.empId) || { name: '', branchId: '' };
+        const branchName = db.branches.find(b => b.id === employee.branchId)?.name || '';
+        tbody.innerHTML += `
+            <tr>
+                <td>${getDayName(item.date)} - ${item.date}</td>
+                <td>${employee.employeeNumber || ''}</td>
+                <td>${employee.name}</td>
+                <td>${branchName}</td>
+                <td>${(parseFloat(item.amount) || 0).toLocaleString()}</td>
+                <td>${item.notes || '-'}</td>
+                <td class="no-print">
+                    ${canEdit ? `<button onclick="editDailyAdvance('${item.id}')" class="btn-warning">تعديل</button>` : ''}
+                    ${canDelete ? `<button onclick="deleteDailyAdvance('${item.id}')" class="btn-danger">حذف</button>` : ''}
+                </td>
+            </tr>
+        `;
+    });
+}
+
+function saveDailyAdvance() {
+    if (!canPerform('daily', 'add') && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لحفظ السلف');
+    const id = document.getElementById('advanceEditId').value;
+    const empId = document.getElementById('advanceEmp').value;
+    const date = document.getElementById('advanceDate').value;
+    const amount = parseFloat(document.getElementById('advanceAmount').value) || 0;
+    const notes = document.getElementById('advanceNotes').value.trim();
+    if (!empId || !date || amount <= 0) return alert('أكمل بيانات السلفة بمبلغ صحيح');
+    if (id && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لتعديل السلفة');
+    if (!id && !canPerform('daily', 'add')) return alert('ليس لديك صلاحية لإضافة السلفة');
+    const duplicateAdvance = (db.dailyAdvances || []).find(x => x.empId === empId && x.date === date && x.id !== id);
+    if (duplicateAdvance) return alert(`يوجد سلفة مسجلة مسبقاً للموظف ${getEmployeeLabel(empId)} في تاريخ ${date}`);
+
+    const entry = { id: id || 'adv' + Date.now(), empId, date, amount, notes, createdAt: new Date().toISOString() };
+    if (id) {
+        const idx = db.dailyAdvances.findIndex(x => x.id === id);
+        if (idx !== -1) db.dailyAdvances[idx] = entry;
+    } else {
+        db.dailyAdvances = db.dailyAdvances || [];
+        db.dailyAdvances.push(entry);
+    }
+    resetDailyAdvanceForm();
+    saveDB();
+}
+
+function editDailyAdvance(id) {
+    if (!canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لتعديل السلفة');
+    const entry = (db.dailyAdvances || []).find(x => x.id === id);
+    if (!entry) return alert('سجل السلفة غير موجود');
+    document.getElementById('advanceEditId').value = entry.id;
+    document.getElementById('advanceEmp').value = entry.empId;
+    document.getElementById('advanceDate').value = entry.date;
+    document.getElementById('advanceAmount').value = entry.amount;
+    document.getElementById('advanceNotes').value = entry.notes || '';
+    document.getElementById('btnSaveAdvance').innerText = 'تحديث السلفة';
+    switchDailyPanel('daily-advance-panel');
+}
+
+function resetDailyAdvanceForm() {
+    document.getElementById('advanceEditId').value = '';
+    document.getElementById('advanceEmp').value = '';
+    document.getElementById('advanceDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('advanceAmount').value = '';
+    document.getElementById('advanceNotes').value = '';
+    document.getElementById('btnSaveAdvance').innerText = 'إضافة السلفة';
+}
+
+function deleteDailyAdvance(id) {
+    if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف السلفة');
+    if (!confirm('هل تريد حذف هذه السلفة؟')) return;
+    db.dailyAdvances = (db.dailyAdvances || []).filter(x => x.id !== id);
+    saveDB();
+}
+
 function switchDailyPanel(panelId) {
     document.querySelectorAll('.daily-panel').forEach(panel => panel.classList.remove('active'));
     document.querySelectorAll('.sub-tab-btn[data-daily-panel]').forEach(btn => btn.classList.remove('active'));
@@ -3180,6 +3441,13 @@ function switchDailyPanel(panelId) {
     if (panel) panel.classList.add('active');
     const btn = document.querySelector(`.sub-tab-btn[data-daily-panel="${panelId}"]`);
     if (btn) btn.classList.add('active');
+    // تعديل جديد: إعادة رسم السلف عند فتح تبويبها، مثل الإضافي.
+    // الكود الأصلي كان يبدّل اللوحة فقط دون منطق خاص بالسلف.
+    if (panelId === 'daily-advance-panel') {
+        renderDailyAdvances();
+    } else if (panelId === 'daily-extra-panel') {
+        renderDailyExtras();
+    }
 }
 
 // ========== Archive Panel Switching ==========
@@ -3204,16 +3472,16 @@ function sendDailyRecords() {
     const dateFrom = document.getElementById('dailyFilterFrom').value;
     const dateTo = document.getElementById('dailyFilterTo').value;
     const branchName = branchId === 'all' ? 'الكل' : db.branches.find(b => b.id === branchId)?.name || 'الكل';
-    
+
     const records = db.dailyFollowUps.filter(item => {
         return (branchId === 'all' || item.branchId === branchId)
             && (!dateFrom || item.date >= dateFrom)
             && (!dateTo || item.date <= dateTo);
     });
-    
+
     if (!records.length) return alert('لا توجد سجلات لإرسالها. اختر فرعاً وفترة صحيحة.');
     if (!confirm(`هل تريد إرسال ${records.length} سجل تعقيب يومي للفرع "${branchName}" إلى مدير الموارد البشرية؟`)) return;
-    
+
     const reportId = 'sr' + Date.now();
     db.sentReports.push({
         id: reportId,
@@ -3224,11 +3492,11 @@ function sendDailyRecords() {
         entries: JSON.parse(JSON.stringify(records)),
         status: 'pending'
     });
-    
+
     // حذف السجلات من التعقيب اليومي بعد الإرسال
     const recordIds = new Set(records.map(r => r.id));
     db.dailyFollowUps = db.dailyFollowUps.filter(item => !recordIds.has(item.id));
-    
+
     saveDB();
     renderDailyFollowups();
     renderSentReports();
@@ -3241,12 +3509,12 @@ function renderSentReports() {
     const sentListTbody = document.getElementById('sentTableBody');
     if (!sentListTbody) return;
     sentListTbody.innerHTML = '';
-    
+
     const branchId = document.getElementById('sentFilterBranch')?.value || 'all';
     const from = document.getElementById('sentFilterFrom')?.value || '';
     const to = document.getElementById('sentFilterTo')?.value || '';
     const canTransfer = currentUser && currentUser.role === 'admin';
-    
+
     // تحديث قائمة الفروع حسب المستخدم
     const branchSelect = document.getElementById('sentFilterBranch');
     if (branchSelect) {
@@ -3260,23 +3528,23 @@ function renderSentReports() {
         });
         branchSelect.value = userBranches.find(b => b.id === savedVal) ? savedVal : 'all';
     }
-    
+
     const filtered = db.sentReports.filter(report => {
         return (branchId === 'all' || report.branchId === branchId)
             && (!from || report.date >= from)
             && (!to || report.date <= to);
     });
-    
+
     if (!filtered.length) {
         sentListTbody.innerHTML = '<tr><td colspan="6">لا توجد تقارير مرسلة</td></tr>';
         return;
     }
-    
+
     filtered.forEach(report => {
         const statusLabel = report.status === 'pending' ? 'بانتظار الترحيل' : 'تم الترحيل';
         const statusColor = report.status === 'pending' ? '#f39c12' : '#27ae60';
         const canTransferThis = canTransfer && report.status === 'pending';
-        
+
         sentListTbody.innerHTML += `
             <tr>
                 <td>${report.branchName}</td>
@@ -3299,7 +3567,7 @@ function editSentReport(reportId) {
     if (!canPerform('archive', 'edit')) return alert('ليس لديك صلاحية لتعديل التعقيب المرسل');
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // إنشاء نافذة التعديل المنبثقة (نفس تصميم editArchivedReport)
     let html = `<div style="direction:rtl; padding:20px; font-family:Tahoma,sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #2c3e50; padding-bottom:10px; margin-bottom:15px;">
@@ -3321,15 +3589,14 @@ function editSentReport(reportId) {
                 </tr>
             </thead>
             <tbody>`;
-    
+
     const entries = report.entries || [];
     entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
         const statusOptions = ['present', 'absent', 'annual', 'holiday_present']
-            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${
-                s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : 'مناسبة'
-            }</option>`).join('');
-        
+            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : 'مناسبة'
+                }</option>`).join('');
+
         let periodOptions = '<option value="all">الكل</option>';
         const emp = employee.id ? db.employees.find(e => e.id === item.empId) : null;
         const shift = emp ? db.workShifts.find(s => s.id === emp.shiftId) : null;
@@ -3338,7 +3605,7 @@ function editSentReport(reportId) {
                 periodOptions += `<option value="${p.id}" ${item.period === p.id ? 'selected' : ''}>${p.name}</option>`;
             });
         }
-        
+
         html += `<tr${idx % 2 === 0 ? ' style="background:#f2f2f2;"' : ''}>
             <td style="padding:4px; border:1px solid #666; text-align:center;">${idx + 1}</td>
             <td style="padding:4px; border:1px solid #666; text-align:center;">
@@ -3361,14 +3628,14 @@ function editSentReport(reportId) {
             </td>
         </tr>`;
     });
-    
+
     html += `</tbody></table>
         <div style="text-align:center; margin-top:20px;">
             <button onclick="saveSentReportEdits('${reportId}')" style="padding:10px 30px; background-color:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold;">💾 حفظ التعديلات</button>
             <button onclick="closeEditArchivedModal()" style="padding:10px 20px; background-color:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:10px;">إلغاء</button>
         </div>
     </div>`;
-    
+
     const modalDiv = document.createElement('div');
     modalDiv.id = 'editArchivedModal';
     modalDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
@@ -3384,23 +3651,23 @@ function saveSentReportEdits(reportId) {
     if (!canPerform('archive', 'edit')) return alert('ليس لديك صلاحية لتعديل التعقيب المرسل');
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // جمع التعديلات من النموذج
     const entries = report.entries || [];
     const changes = [];
-    
+
     entries.forEach((item, idx) => {
         const statusSelect = document.getElementById(`editStatus_${idx}`);
         const periodSelect = document.getElementById(`editPeriod_${idx}`);
         const notesInput = document.getElementById(`editNotes_${idx}`);
         const dateInput = document.getElementById(`editDate_${idx}`);
         if (!statusSelect) return;
-        
+
         const newStatus = statusSelect.value;
         const newPeriod = periodSelect ? periodSelect.value : (item.period || 'all');
         const newNotes = notesInput ? notesInput.value.trim() : '';
         const newDate = dateInput ? dateInput.value : item.date;
-        
+
         if (newStatus !== item.statusType || newNotes !== (item.notes || '') || newDate !== item.date || newPeriod !== (item.period || 'all')) {
             changes.push({
                 empId: item.empId,
@@ -3413,20 +3680,20 @@ function saveSentReportEdits(reportId) {
                 oldNotes: item.notes || '',
                 newNotes: newNotes
             });
-            
+
             item.statusType = newStatus;
             item.notes = newNotes;
             item.date = newDate;
             item.period = newPeriod;
         }
     });
-    
+
     if (!changes.length) {
         alert('لم يتم إجراء أي تغييرات.');
         closeEditArchivedModal();
         return;
     }
-    
+
     // تحديث التعقيب الرئيسي (absences) - نفس منطق saveArchivedReportEdits
     changes.forEach(change => {
         const mainRec = db.absences.find(a => a.empId === change.empId && a.date === change.oldDate);
@@ -3452,7 +3719,7 @@ function saveSentReportEdits(reportId) {
             addOrReplaceAbsenceRecord(rec);
         }
     });
-    
+
     // تحديث الأرشيف (archivedReports) إذا كان التقرير قد تم ترحيله
     if (report.status === 'transferred') {
         db.archivedReports.forEach(archived => {
@@ -3467,20 +3734,20 @@ function saveSentReportEdits(reportId) {
             });
         });
     }
-    
+
     saveDB();
     closeEditArchivedModal();
-    
+
     let summaryMsg = '✅ تم حفظ التعديلات بنجاح!\n\n';
     changes.forEach((c, i) => {
         const emp = findEmployeeById(c.empId);
         const empName = emp ? emp.name : c.empId;
         const statusLabels = { present: 'حاضر', absent: 'غائب', annual: 'إجازة سنوية', holiday_present: 'مناسبة' };
         const dateChanged = c.oldDate !== c.newDate ? ` (${c.oldDate} → ${c.newDate})` : ` (${c.oldDate})`;
-        summaryMsg += i+1 + '. ' + empName + dateChanged + ': ' + (statusLabels[c.oldStatus] || c.oldStatus) + ' → ' + (statusLabels[c.newStatus] || c.newStatus) + '\n';
+        summaryMsg += i + 1 + '. ' + empName + dateChanged + ': ' + (statusLabels[c.oldStatus] || c.oldStatus) + ' → ' + (statusLabels[c.newStatus] || c.newStatus) + '\n';
     });
     summaryMsg += '\n📌 تم تحديث:\n- التعقيب المرسل ✅\n- التعقيب الرئيسي ✅' + (report.status === 'transferred' ? '\n- التعقيب المؤرشف ✅' : '');
-    
+
     alert(summaryMsg);
     renderSentReports();
     renderMainTable();
@@ -3490,11 +3757,11 @@ function saveSentReportEdits(reportId) {
 // ========== Transfer Sent Report to Main (المرحلة الثالثة: ترحيل التعقيب المرسل إلى الرئيسي) ==========
 function transferSentReportToMain(reportId) {
     if (!currentUser || currentUser.role !== 'admin') return alert('فقط مدير الموارد البشرية يمكنه ترحيل التعقيب إلى الرئيسي');
-    
+
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
     if (report.status !== 'pending') return alert('تم ترحيل هذا التقرير مسبقاً');
-    
+
     // التحقق من عدم وجود تعارضات
     const duplicateEntry = report.entries.find(item =>
         item.statusType !== 'present' && db.absences.some(a => a.empId === item.empId && a.date === item.date)
@@ -3502,9 +3769,9 @@ function transferSentReportToMain(reportId) {
     if (duplicateEntry) {
         return alert(`لا يمكن الترحيل؛ يوجد سجل مسبقاً في التعقيب الرئيسي للموظف ${getEmployeeLabel(duplicateEntry.empId)} في تاريخ ${duplicateEntry.date}.`);
     }
-    
+
     if (!confirm(`هل تريد ترحيل ${report.entries.length} سجل من تقرير "${report.branchName}" إلى التعقيب الرئيسي؟`)) return;
-    
+
     // ترحيل السجلات إلى التعقيب الرئيسي
     report.entries.forEach(item => {
         if (item.statusType === 'present') return;
@@ -3519,10 +3786,10 @@ function transferSentReportToMain(reportId) {
         };
         addOrReplaceAbsenceRecord(rec);
     });
-    
+
     // تحديث حالة التقرير
     report.status = 'transferred';
-    
+
     // إنشاء ملف PDF للأرشفة
     const fileName = `sent_archive_${report.branchName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
     db.archivedReports.push({
@@ -3534,7 +3801,7 @@ function transferSentReportToMain(reportId) {
         entries: JSON.parse(JSON.stringify(report.entries)),
         fileName: fileName
     });
-    
+
     saveDB();
     renderSentReports();
     renderMainTable();
@@ -3545,7 +3812,7 @@ function transferSentReportToMain(reportId) {
 function previewSentReport(reportId) {
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     const companyName = db.settings.companyName || '';
     const logoUrl = db.settings.logo || '';
     const logoHtml = logoUrl
@@ -3581,7 +3848,7 @@ function previewSentReport(reportId) {
 
     const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
     const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-    
+
     const paperSizeStyles = {
         'A4': { width: '210mm', height: '297mm' },
         'A5': { width: '148mm', height: '210mm' },
@@ -3651,19 +3918,19 @@ function previewSentReport(reportId) {
         printFrame.style.width = '0';
         printFrame.style.height = '0';
         document.body.appendChild(printFrame);
-        
+
         const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(printContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch(e) { window.print(); }
+            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
             setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
         }, 500);
         return;
     }
-    
+
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
@@ -3674,7 +3941,7 @@ function previewSentReport(reportId) {
 function viewSentReport(reportId) {
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     let html = `<div style="direction:rtl; padding:20px; font-family:Tahoma,sans-serif;">
         <h3 style="text-align:center;">التعقيب المرسل - ${report.branchName}</h3>
         <p style="text-align:center;">تاريخ الإرسال: ${report.date}</p>
@@ -3691,7 +3958,7 @@ function viewSentReport(reportId) {
                 </tr>
             </thead>
             <tbody>`;
-    
+
     report.entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
         const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
@@ -3713,9 +3980,9 @@ function viewSentReport(reportId) {
             <td style="padding:4px; border:1px solid #666; text-align:center;">${item.notes || '-'}</td>
         </tr>`;
     });
-    
+
     html += `</tbody></table></div>`;
-    
+
     // عرض المحتوى في نافذة منبثقة
     const previewDiv = document.createElement('div');
     previewDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
@@ -3733,7 +4000,7 @@ function viewSentReport(reportId) {
 function viewArchivedReport(reportId) {
     const report = db.archivedReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     let html = `<div style="direction:rtl; padding:20px; font-family:Tahoma,sans-serif;">
         <h3 style="text-align:center;">التقرير المؤرشف - ${report.branchName}</h3>
         <p style="text-align:center;">تاريخ الأرشفة: ${report.date}</p>
@@ -3750,7 +4017,7 @@ function viewArchivedReport(reportId) {
                 </tr>
             </thead>
             <tbody>`;
-    
+
     const entries = report.entries || [];
     entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
@@ -3773,9 +4040,9 @@ function viewArchivedReport(reportId) {
             <td style="padding:4px; border:1px solid #666; text-align:center;">${item.notes || '-'}</td>
         </tr>`;
     });
-    
+
     html += `</tbody></table></div>`;
-    
+
     const previewDiv = document.createElement('div');
     previewDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
     previewDiv.innerHTML = `
@@ -3851,7 +4118,7 @@ function buildArchivePdf(reportId, branchName, records) {
     const logoHtml = logoUrl
         ? `<img src="${logoUrl}" style="width:100%;height:auto;max-height:80px;object-fit:contain;display:block;margin:0 auto 8px;" alt="شعار الشركة">`
         : '';
-    
+
     // بناء صفوف الجدول
     let tableRows = '';
     records.forEach((item, idx) => {
@@ -3944,7 +4211,7 @@ function editArchivedReport(reportId) {
     if (!canPerform('archive', 'edit')) return alert('ليس لديك صلاحية لتعديل التعقيب المرحل');
     const report = db.archivedReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // إنشاء نافذة التعديل المنبثقة
     let html = `<div style="direction:rtl; padding:20px; font-family:Tahoma,sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #2c3e50; padding-bottom:10px; margin-bottom:15px;">
@@ -3966,15 +4233,14 @@ function editArchivedReport(reportId) {
                 </tr>
             </thead>
             <tbody>`;
-    
+
     const entries = report.entries || [];
     entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
         const statusOptions = ['present', 'absent', 'annual', 'holiday_present']
-            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${
-                s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : 'مناسبة'
-            }</option>`).join('');
-        
+            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : 'مناسبة'
+                }</option>`).join('');
+
         // إنشاء خيارات الفترة
         let periodOptions = '<option value="all">الكل</option>';
         const emp = employee.id ? db.employees.find(e => e.id === item.empId) : null;
@@ -3984,7 +4250,7 @@ function editArchivedReport(reportId) {
                 periodOptions += `<option value="${p.id}" ${item.period === p.id ? 'selected' : ''}>${p.name}</option>`;
             });
         }
-        
+
         const dayName = getDayName(item.date, false);
         html += `<tr${idx % 2 === 0 ? ' style="background:#f2f2f2;"' : ''}>
             <td style="padding:4px; border:1px solid #666; text-align:center;">${idx + 1}</td>
@@ -4008,14 +4274,14 @@ function editArchivedReport(reportId) {
             </td>
         </tr>`;
     });
-    
+
     html += `</tbody></table>
         <div style="text-align:center; margin-top:20px;">
             <button onclick="saveArchivedReportEdits('${reportId}')" style="padding:10px 30px; background-color:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold;">💾 حفظ التعديلات</button>
             <button onclick="closeEditArchivedModal()" style="padding:10px 20px; background-color:#e74c3c; color:white; border:none; border-radius:4px; cursor:pointer; margin-right:10px;">إلغاء</button>
         </div>
     </div>`;
-    
+
     const modalDiv = document.createElement('div');
     modalDiv.id = 'editArchivedModal';
     modalDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
@@ -4037,23 +4303,23 @@ function saveArchivedReportEdits(reportId) {
     if (!canPerform('archive', 'edit')) return alert('ليس لديك صلاحية لتعديل التعقيب المرحل');
     const report = db.archivedReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // جمع التعديلات من النموذج
     const entries = report.entries || [];
     const changes = [];
-    
+
     entries.forEach((item, idx) => {
         const statusSelect = document.getElementById(`editStatus_${idx}`);
         const periodSelect = document.getElementById(`editPeriod_${idx}`);
         const notesInput = document.getElementById(`editNotes_${idx}`);
         const dateInput = document.getElementById(`editDate_${idx}`);
         if (!statusSelect) return;
-        
+
         const newStatus = statusSelect.value;
         const newPeriod = periodSelect ? periodSelect.value : (item.period || 'all');
         const newNotes = notesInput ? notesInput.value.trim() : '';
         const newDate = dateInput ? dateInput.value : item.date;
-        
+
         // تحقق مما إذا كانت القيمة تغيرت
         if (newStatus !== item.statusType || newNotes !== (item.notes || '') || newDate !== item.date || newPeriod !== (item.period || 'all')) {
             changes.push({
@@ -4067,7 +4333,7 @@ function saveArchivedReportEdits(reportId) {
                 oldNotes: item.notes || '',
                 newNotes: newNotes
             });
-            
+
             // تحديث السجل في archivedReports
             item.statusType = newStatus;
             item.notes = newNotes;
@@ -4075,18 +4341,18 @@ function saveArchivedReportEdits(reportId) {
             item.period = newPeriod;
         }
     });
-    
+
     if (!changes.length) {
         alert('لم يتم إجراء أي تغييرات.');
         document.querySelector('div[style*="position:fixed"][style*="z-index:2000"]')?.remove();
         return;
     }
-    
+
     // تحديث البيانات في التعقيب الرئيسي (absences)
     changes.forEach(change => {
         // البحث عن السجل في absences بالتاريخ القديم (قبل التعديل)
         const mainRec = db.absences.find(a => a.empId === change.empId && a.date === change.oldDate);
-        
+
         // معالجة رصيد الإجازات السنوية للسجل القديم
         if (mainRec) {
             // إذا كان السجل القديم إجازة سنوية، نعيد الرصيد
@@ -4099,7 +4365,7 @@ function saveArchivedReportEdits(reportId) {
             // حذف السجل القديم
             db.absences = db.absences.filter(a => !(a.id === mainRec.id));
         }
-        
+
         // إضافة السجل الجديد إذا لم يكن حاضراً
         if (change.newStatus !== 'present') {
             // إذا كان التعديل إلى إجازة سنوية، نخصم الرصيد
@@ -4113,7 +4379,7 @@ function saveArchivedReportEdits(reportId) {
                     empObj.leaveBalance = Math.max(0, parseFloat(empObj.leaveBalance || 0) - val);
                 }
             }
-            
+
             const rec = {
                 id: 'a' + Date.now() + Math.random().toString(36).slice(2),
                 empId: change.empId,
@@ -4124,11 +4390,11 @@ function saveArchivedReportEdits(reportId) {
             addOrReplaceAbsenceRecord(rec);
         }
     });
-    
+
     // تحديث البيانات في sentReports
     db.sentReports.forEach(sentReport => {
         if (sentReport.status === 'transferred') return;
-        
+
         sentReport.entries.forEach(entry => {
             const change = changes.find(c => c.empId === entry.empId && c.oldDate === entry.date);
             if (change) {
@@ -4139,12 +4405,12 @@ function saveArchivedReportEdits(reportId) {
             }
         });
     });
-    
+
     saveDB();
-    
+
     // إغلاق النافذة المنبثقة
     closeEditArchivedModal();
-    
+
     // عرض ملخص التغييرات
     let summaryMsg = '✅ تم حفظ التعديلات بنجاح!\n\n';
     changes.forEach((c, i) => {
@@ -4152,12 +4418,12 @@ function saveArchivedReportEdits(reportId) {
         const empName = emp ? emp.name : c.empId;
         const statusLabels = { present: 'حاضر', absent: 'غائب', annual: 'إجازة سنوية', holiday_present: 'مناسبة' };
         const dateChanged = c.oldDate !== c.newDate ? ` (${c.oldDate} → ${c.newDate})` : ` (${c.oldDate})`;
-        summaryMsg += i+1 + '. ' + empName + dateChanged + ': ' + (statusLabels[c.oldStatus] || c.oldStatus) + ' → ' + (statusLabels[c.newStatus] || c.newStatus) + '\n';
+        summaryMsg += i + 1 + '. ' + empName + dateChanged + ': ' + (statusLabels[c.oldStatus] || c.oldStatus) + ' → ' + (statusLabels[c.newStatus] || c.newStatus) + '\n';
     });
     summaryMsg += '\n📌 تم تحديث:\n- التعقيب المؤرشف ✅\n- التعقيب الرئيسي ✅\n- التعقيب المرسل ✅';
-    
+
     alert(summaryMsg);
-    
+
     // تحديث الواجهات
     renderArchiveReports();
     renderMainTable();
@@ -4167,14 +4433,14 @@ function saveArchivedReportEdits(reportId) {
 // === دالة طباعة جدول التعقيب اليومي ===
 function printDailyTable() {
     if (!canPerform('daily', 'view')) return alert('ليس لديك صلاحية لعرض التعقيب اليومي');
-    
+
     const dailyTable = document.querySelector('#daily-followup-panel .table-wrapper table');
     if (!dailyTable) return alert('لا يوجد جدول للطباعة');
-    
+
     const from = document.getElementById('dailyFilterFrom').value;
     const to = document.getElementById('dailyFilterTo').value;
     const dateRangeText = from && to ? `من ${from} إلى ${to}` : 'التعقيب اليومي';
-    
+
     const tableClone = dailyTable.cloneNode(true);
     const rows = tableClone.querySelectorAll('tr');
     rows.forEach(row => {
@@ -4186,7 +4452,7 @@ function printDailyTable() {
 
     const firstRow = tableClone.querySelector('tr');
     const colCount = firstRow ? firstRow.cells.length : 1;
-    
+
     const companyName = db.settings.companyName || '';
     const logoUrl = db.settings.logo || '';
     const logoHtml = logoUrl
@@ -4195,7 +4461,7 @@ function printDailyTable() {
 
     const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
     const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-    
+
     const paperSizeStyles = {
         'A4': { width: '210mm', height: '297mm' },
         'A5': { width: '148mm', height: '210mm' },
@@ -4213,7 +4479,7 @@ function printDailyTable() {
     if (originalThead) {
         columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
     }
-    
+
     const headerRowHtml = `<tr style="display:table-row;">
         <td colspan="${colCount}" style="text-align:center;border:0!important;padding:0!important;">
             ${logoHtml}
@@ -4222,7 +4488,7 @@ function printDailyTable() {
             <div style="font-size:11px;color:#555;margin-bottom:5px;">${dateRangeText}</div>
         </td>
     </tr>`;
-    
+
     const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
@@ -4259,19 +4525,19 @@ function printDailyTable() {
         printFrame.style.width = '0';
         printFrame.style.height = '0';
         document.body.appendChild(printFrame);
-        
+
         const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(printContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch(e) { window.print(); }
+            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
             setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
         }, 500);
         return;
     }
-    
+
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
@@ -4326,11 +4592,11 @@ function deleteArchivedReport(reportId) {
     if (!canPerform('archive', 'delete')) return alert('ليس لديك صلاحية لحذف التعقيب المؤرشف');
     const report = db.archivedReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // رسالة تأكيد الحذف مع تفاصيل التقرير
     const msg = `🗑️ تأكيد حذف التعقيب المؤرشف\n\nالفرع: ${report.branchName}\nالتاريخ: ${report.date}\nعدد السجلات: ${report.entries.length}\n\nسيتم حذف البيانات من جميع جداول النظام وتحديث رصيد الإجازات.\nهل أنت متأكد من الحذف؟`;
     if (!confirm(msg)) return;
-    
+
     // 1. إعادة رصيد الإجازات للسجلات من نوع annual
     (report.entries || []).forEach(item => {
         if (item.statusType === 'annual') {
@@ -4340,31 +4606,31 @@ function deleteArchivedReport(reportId) {
             }
         }
     });
-    
+
     // 2. حذف السجلات من التعقيب الرئيسي (absences)
     (report.entries || []).forEach(item => {
         if (item.statusType !== 'present') {
             db.absences = db.absences.filter(a => !(a.empId === item.empId && a.date === item.date));
         }
     });
-    
+
     // 3. حذف التقرير من التقرير المؤرشفة
     db.archivedReports = db.archivedReports.filter(r => r.id !== reportId);
-    
+
     // 4. حذف التقرير من التعقيب المرسل إذا كان موجوداً
     db.sentReports = db.sentReports.filter(sr => {
         if (sr.status === 'transferred') {
             // مقارنة السجلات لتحديد إذا كان هذا التقرير مرتبطاً
-            const isRelated = sr.entries.length === report.entries.length && 
-                sr.entries.every((entry, idx) => 
-                    entry.empId === report.entries[idx]?.empId && 
+            const isRelated = sr.entries.length === report.entries.length &&
+                sr.entries.every((entry, idx) =>
+                    entry.empId === report.entries[idx]?.empId &&
                     entry.date === report.entries[idx]?.date
                 );
             return !isRelated;
         }
         return true;
     });
-    
+
     saveDB();
     renderArchiveReports();
     renderMainTable();
@@ -4375,7 +4641,7 @@ function deleteArchivedReport(reportId) {
 function previewArchivedReport(reportId) {
     const report = db.archivedReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
-    
+
     // بناء محتوى الطباعة باستخدام نفس طريقة printVisibleTable / buildArchivePdf
     const companyName = db.settings.companyName || '';
     const logoUrl = db.settings.logo || '';
@@ -4415,7 +4681,7 @@ function previewArchivedReport(reportId) {
 
     const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
     const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-    
+
     const paperSizeStyles = {
         'A4': { width: '210mm', height: '297mm' },
         'A5': { width: '148mm', height: '210mm' },
@@ -4486,19 +4752,19 @@ function previewArchivedReport(reportId) {
         printFrame.style.width = '0';
         printFrame.style.height = '0';
         document.body.appendChild(printFrame);
-        
+
         const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
         iframeDoc.open();
         iframeDoc.write(printContent);
         iframeDoc.close();
-        
+
         setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch(e) { window.print(); }
+            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
             setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
         }, 500);
         return;
     }
-    
+
     printWindow.document.open();
     printWindow.document.write(printContent);
     printWindow.document.close();
@@ -4646,6 +4912,8 @@ function switchTab(tabId) {
         case 'tab-daily':
             renderDailyFollowups();
             renderDailyExtras();
+            // تعديل جديد: تحديث السلف عند فتح تبويب التعقيب اليومي.
+            renderDailyAdvances();
             break;
         case 'tab-archive':
             renderArchiveReports();
@@ -4824,50 +5092,50 @@ async function bootApp() {
 function enableColumnToggleForTable(table, tableKey) {
     if (!table || table.dataset.toggleEnabled === 'true') return;
     table.dataset.toggleEnabled = 'true';
-    
+
     // استرجاع الحالة المحفوظة
     const savedKey = `hideCols_${tableKey}`;
     let hiddenCols = [];
     try {
         const saved = localStorage.getItem(savedKey);
         if (saved) hiddenCols = JSON.parse(saved);
-    } catch(e) {}
-    
+    } catch (e) { }
+
     const headers = table.querySelectorAll('thead th, thead td');
-    
+
     // إضافة أيقونة العين لكل عنوان عمود قابل للإخفاء
     headers.forEach((header, idx) => {
         if (header.classList.contains('no-print')) return;
         if (header.classList.contains('dyn-date')) return;
         if (header.classList.contains('dyn-date-cell')) return;
-        
+
         // إضافة زر العين
         const eyeBtn = document.createElement('span');
         eyeBtn.className = 'col-toggle-btn';
         eyeBtn.title = 'إظهار/إخفاء العمود';
         eyeBtn.style.cssText = 'cursor:pointer;margin-right:4px;font-size:13px;user-select:none;display:inline-block;';
         eyeBtn.dataset.colIndex = idx;
-        
+
         const isHidden = hiddenCols.includes(idx);
         eyeBtn.textContent = isHidden ? '👁️‍🗨️' : '👁️';
         if (isHidden) eyeBtn.style.opacity = '0.5';
-        
-        eyeBtn.addEventListener('click', function(e) {
+
+        eyeBtn.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation();
             const colIdx = parseInt(this.dataset.colIndex);
             toggleColumn(table, tableKey, colIdx, this);
         });
-        
+
         // إضافة الزر قبل نص العنوان
         header.insertBefore(eyeBtn, header.firstChild);
-        
+
         // تطبيق الإخفاء على العمود
         if (isHidden) {
             setColumnVisibility(table, idx, false);
         }
     });
-    
+
     // إضافة زر إعادة تعيين الإخفاء بجانب الجدول
     const wrapper = table.closest('.table-wrapper') || table.parentElement;
     if (wrapper && !wrapper.querySelector('.col-toggle-reset-btn')) {
@@ -4875,7 +5143,7 @@ function enableColumnToggleForTable(table, tableKey) {
         resetBtn.className = 'col-toggle-reset-btn';
         resetBtn.textContent = '👁️ إظهار الكل';
         resetBtn.style.cssText = 'font-size:11px;padding:2px 8px;margin-bottom:4px;border:1px solid #ccc;border-radius:3px;cursor:pointer;background:#f9f9f9;';
-        resetBtn.addEventListener('click', function(e) {
+        resetBtn.addEventListener('click', function (e) {
             e.preventDefault();
             resetAllColumns(table, tableKey);
         });
@@ -4890,10 +5158,10 @@ function toggleColumn(table, tableKey, colIndex, eyeBtn) {
     try {
         const saved = localStorage.getItem(savedKey);
         if (saved) hiddenCols = JSON.parse(saved);
-    } catch(e) {}
-    
+    } catch (e) { }
+
     const isCurrentlyHidden = hiddenCols.includes(colIndex);
-    
+
     if (isCurrentlyHidden) {
         // إظهار العمود
         hiddenCols = hiddenCols.filter(i => i !== colIndex);
@@ -4911,7 +5179,7 @@ function toggleColumn(table, tableKey, colIndex, eyeBtn) {
             eyeBtn.style.opacity = '0.5';
         }
     }
-    
+
     localStorage.setItem(savedKey, JSON.stringify(hiddenCols));
 }
 
@@ -4930,7 +5198,7 @@ function setColumnVisibility(table, colIndex, visible) {
 function resetAllColumns(table, tableKey) {
     const savedKey = `hideCols_${tableKey}`;
     localStorage.removeItem(savedKey);
-    
+
     // إظهار جميع الأعمدة
     const rows = table.querySelectorAll('tr');
     rows.forEach(row => {
@@ -4938,7 +5206,7 @@ function resetAllColumns(table, tableKey) {
             cell.style.display = '';
         });
     });
-    
+
     // تحديث أيقونات العين
     const eyeBtns = table.querySelectorAll('.col-toggle-btn');
     eyeBtns.forEach(btn => {
@@ -4952,7 +5220,7 @@ function enableColumnToggleForAllTables() {
     // جدول التعقيب الرئيسي
     const mainTable = document.querySelector('#tab-main .main-panel.active table');
     if (mainTable) enableColumnToggleForTable(mainTable, 'main');
-    
+
     // جدول التقرير
     const reportTable = document.querySelector('#report-panel .table-wrapper table');
     if (reportTable) enableColumnToggleForTable(reportTable, 'report');
@@ -5025,7 +5293,7 @@ function sortTableData(table, colIndex) {
 function enableTableSorting() {
     const selectors = [
         '#tab-main .table-wrapper table',
-        '#tab-employees .table-wrapper table', 
+        '#tab-employees .table-wrapper table',
         '#tab-branches .table-wrapper table',
         '#tab-users table:not(.no-sort)',
         '#tab-archive table',
@@ -5033,6 +5301,8 @@ function enableTableSorting() {
         '#settings-subtab-shifts .table-wrapper table',
         '#daily-followup-panel .table-wrapper table',
         '#daily-extra-panel .table-wrapper table',
+        // تعديل جديد: دعم الفرز في جدول السلف.
+        '#daily-advance-panel .table-wrapper table',
         '#report-panel .table-wrapper table'
     ];
     selectors.forEach(selector => {
@@ -5046,16 +5316,16 @@ function enableTableSorting() {
 function makeTableSortable(table) {
     if (!table || table.dataset.sortable === 'true') return;
     table.dataset.sortable = 'true';
-    
+
     const headers = table.querySelectorAll('thead th, thead td');
     headers.forEach((header, idx) => {
         if (header.classList.contains('no-print')) return;
         if (header.classList.contains('dyn-date')) return;
-        
+
         header.style.cursor = 'pointer';
         header.style.userSelect = 'none';
         header.title = 'انقر للفرز';
-        
+
         // إضافة سهم الفرز
         if (!header.querySelector('.sort-arrow')) {
             const arrow = document.createElement('span');
@@ -5064,12 +5334,12 @@ function makeTableSortable(table) {
             arrow.textContent = ' ⇅';
             header.appendChild(arrow);
         }
-        
+
         // إزالة المستمع القديم وإضافة الجديد
         if (header._sortHandler) {
             header.removeEventListener('click', header._sortHandler);
         }
-        header._sortHandler = function(e) {
+        header._sortHandler = function (e) {
             e.stopPropagation();
             // فرز الجدول
             sortTableData(table, idx);

@@ -68,6 +68,9 @@ def default_state():
 		"absences": [],
 		"dailyFollowUps": [],
 		"dailyExtras": [],
+		# تعديل جديد: حفظ السلف اليومية ضمن حالة التطبيق.
+		# الكود الأصلي لم يكن يحتوي على قائمة dailyAdvances.
+		"dailyAdvances": [],
 		"archivedReports": [],
 		"sentReports": [],
 		"holidays": [],
@@ -163,7 +166,8 @@ def _normalize_state(state):
 	clean["branches"] = clean.get("branches") or default_state()["branches"]
 	clean["users"] = _restore_admin_password_if_all_empty(clean.get("users") or default_state()["users"])
 
-	# Ensure lists exist. Added `workShifts` and `sentReports` so saved state will accept and normalize them.
+	# Ensure lists exist. Added `workShifts`, `sentReports`, and `dailyAdvances`
+	# so saved state will accept and normalize them.
 	for list_key in (
 		"branches",
 		"users",
@@ -172,6 +176,9 @@ def _normalize_state(state):
 		"absences",
 		"dailyFollowUps",
 		"dailyExtras",
+		# تعديل جديد: قبول قائمة السلف عند حفظ/تحميل حالة التطبيق.
+		# الكود الأصلي معطل: لم تكن dailyAdvances ضمن القوائم المحفوظة.
+		"dailyAdvances",
 		"archivedReports",
 		"holidays",
 		"sentReports",

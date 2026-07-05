@@ -119,7 +119,8 @@
                         <div style="display: flex; gap: 10px;">
                             <button onclick="printVisibleTable()" style="background-color: var(--primary);">🖨️ طباعة
                                 الجدول</button>
-                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️ معاينة الطباعة</button>
+                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️
+                                معاينة الطباعة</button>
                             <button onclick="resetMainFilters()"
                                 style="background-color:#607d8b; margin-left:8px;">إعادة ضبط الفلاتر</button>
                         </div>
@@ -134,12 +135,22 @@
                                     <th>الاسم</th>
                                     <th>الفرع</th>
                                     <th>رصيد الإجازات</th>
+                                    <!-- تعديل جديد: تم نقل عمود "الأجر اليومي" ليظهر بعد رصيد الإجازات مباشرة -->
+                                    <th>الأجر اليومي</th>
                                     <th>الأيام المتوقعة</th>
+                                    <!-- تعديل جديد: عمود محسوب = الأيام المتوقعة × الأجر اليومي -->
+                                    <th>اجمالي المبلغ المتوقع</th>
                                     <!-- الأعمدة الديناميكية (dyn-date) يتم إنشاؤها تلقائياً في renderMainTable() -->
                                     <th>أيام الغياب</th>
                                     <th>إجازات مستنفذه</th>
+                                    <th>الإجازة الأخرى</th>
                                     <th>الأيام الفعلية</th>
-                                    <th>الأجر اليومي</th>
+                                    <!-- تعديل جديد: عمود محسوب = الأيام الفعلية × الأجر اليومي -->
+                                    <th>اجمالي المبلغ الفعلي</th>
+                                    <!-- تعديل جديد: السلف تخصم من إجمالي المبلغ الفعلي عند حساب الصافي -->
+                                    <th>السلف</th>
+                                    <!-- الكود الأصلي معطل: كان عمود الأجر اليومي هنا بعد الأيام الفعلية -->
+                                    <!-- <th>الأجر اليومي</th> -->
                                     <th>الإضافي</th>
                                     <th>الصافي المستحق</th>
                                     <th class="no-print">إجراءات</th>
@@ -207,31 +218,34 @@
                                 التقرير</button>
                             <button onclick="printReportTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
                                 طباعة التقرير</button>
-                            <button onclick="previewReportTable()" style="background-color:#2ecc71; margin-left:8px;">👁️
+                            <button onclick="previewReportTable()"
+                                style="background-color:#2ecc71; margin-left:8px;">👁️
                                 معاينة الطباعة</button>
                         </div>
                     </div>
                     <div class="table-wrapper">
-                            <table>
-                                <thead>
-                                    <tr id="reportTableHeaderRow">
-                                        <th style="width:40px;">م</th>
-                                <th>الرقم الوظيفي</th>
-                                        <th>الاسم</th>
-                                        <th>الفرع</th>
-                                        <th>رصيد الإجازات</th>
-                                        <th>نوع الدوام</th>
-                                        <th>الفترة</th>
-                                        <!-- أعمدة التاريخ الديناميكية يتم إنشاؤها تلقائياً في renderReportTable() -->
-                                        <th>أيام الحضور</th>
-                                        <th>أيام الغياب</th>
-                                        <th>إجازات سنوية</th>
-                                        <th>الرصيد المتبقي</th>
-                                        <th>المناسبات</th>
-                                        <th>الإضافي</th>
-                                        <th>المستحق</th>
-                                    </tr>
-                                </thead>
+                        <table>
+                            <thead>
+                                <tr id="reportTableHeaderRow">
+                                    <th style="width:40px;">م</th>
+                                    <th>الرقم الوظيفي</th>
+                                    <th>الاسم</th>
+                                    <th>الفرع</th>
+                                    <th>رصيد الإجازات</th>
+                                    <th>نوع الدوام</th>
+                                    <th>الفترة</th>
+                                    <!-- أعمدة التاريخ الديناميكية يتم إنشاؤها تلقائياً في renderReportTable() -->
+                                    <th>أيام الحضور</th>
+                                    <th>أيام الغياب</th>
+                                    <th>إجازات سنوية</th>
+                                    <!-- تعديل جديد: عمود مستقل للإجازة الأخرى -->
+                                    <th>الإجازة الأخرى</th>
+                                    <th>الرصيد المتبقي</th>
+                                    <th>المناسبات</th>
+                                    <th>الإضافي</th>
+                                    <th>المستحق</th>
+                                </tr>
+                            </thead>
                             <tbody id="reportTableBody"></tbody>
                         </table>
                     </div>
@@ -244,6 +258,9 @@
                         onclick="switchDailyPanel('daily-followup-panel')">التعقيب اليومي</button>
                     <button class="sub-tab-btn" data-daily-panel="daily-extra-panel"
                         onclick="switchDailyPanel('daily-extra-panel')">الإضافي</button>
+                    <!-- تعديل جديد: تبويب السلف بجانب تبويب الإضافي -->
+                    <button class="sub-tab-btn" data-daily-panel="daily-advance-panel"
+                        onclick="switchDailyPanel('daily-advance-panel')">السلف</button>
                 </div>
                 <div id="daily-followup-panel" class="daily-panel active">
                     <div class="form-group">
@@ -255,6 +272,8 @@
                                 <option value="present">حاضر</option>
                                 <option value="absent">غائب</option>
                                 <option value="annual">إجازة سنوية</option>
+                                <!-- تعديل جديد: إجازة أخرى تعمل مثل الإجازة السنوية في خصم الأيام الفعلية -->
+                                <option value="other_leave">إجازة أخرى</option>
                                 <option value="holiday_present">مناسبة</option>
                             </select></div>
                         <div class="form-control" id="dailyPeriodContainer"><label>الفترة</label>
@@ -280,6 +299,8 @@
                                 <option value="present">حاضر</option>
                                 <option value="absent">غائب</option>
                                 <option value="annual">إجازة سنوية</option>
+                                <!-- تعديل جديد: فلتر إجازة أخرى -->
+                                <option value="other_leave">إجازة أخرى</option>
                                 <option value="holiday_present">مناسبة</option>
                             </select></div>
                         <div class="form-control"><label>من</label><input type="date" id="dailyFilterFrom"
@@ -287,16 +308,18 @@
                         <div class="form-control"><label>إلى</label><input type="date" id="dailyFilterTo"
                                 onchange="renderDailyFollowups()"></div>
                         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                            <button onclick="sendDailyRecords()" class="btn-success" style="background-color:#2196F3; color:white;">📤 إرسال التعقيب</button>
-                            <button onclick="printDailyTable()" style="background-color: var(--primary);">🖨️ طباعة الجدول</button>
+                            <button onclick="sendDailyRecords()" class="btn-success"
+                                style="background-color:#2196F3; color:white;">📤 إرسال التعقيب</button>
+                            <button onclick="printDailyTable()" style="background-color: var(--primary);">🖨️ طباعة
+                                الجدول</button>
                         </div>
                     </div>
                     <div class="table-wrapper">
                         <table>
                             <thead>
                                 <tr>
-                                <th style="width:40px;">م</th>
-                            <th>اليوم / التاريخ</th>
+                                    <th style="width:40px;">م</th>
+                                    <th>اليوم / التاريخ</th>
                                     <th>رقم الموظف</th>
                                     <th>اسم الموظف</th>
                                     <th>الفرع</th>
@@ -336,7 +359,7 @@
                         <table>
                             <thead>
                                 <tr>
-                            <th>التاريخ</th>
+                                    <th>التاريخ</th>
                                     <th>رقم الموظف</th>
                                     <th>اسم الموظف</th>
                                     <th>الفرع</th>
@@ -346,6 +369,47 @@
                                 </tr>
                             </thead>
                             <tbody id="extraTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- تعديل جديد: واجهة السلف بنفس حقول واجهة الإضافي.
+                     الكود الأصلي لم يكن يحتوي على تبويب أو نموذج للسلف. -->
+                <div id="daily-advance-panel" class="daily-panel">
+                    <div class="form-group">
+                        <input type="hidden" id="advanceEditId">
+                        <div class="form-control"><label>الموظف</label><select id="advanceEmp"></select></div>
+                        <div class="form-control"><label>التاريخ</label><input type="date" id="advanceDate"></div>
+                        <div class="form-control"><label>مبلغ السلفة</label><input type="number" id="advanceAmount"
+                                min="0" step="0.01"></div>
+                        <div class="form-control"><label>ملاحظات</label><input type="text" id="advanceNotes"
+                                placeholder="مثال: سلفة نقدية"></div>
+                        <button id="btnSaveAdvance" onclick="saveDailyAdvance()" style="margin-bottom:5px;">إضافة
+                            السلفة</button>
+                        <button onclick="resetDailyAdvanceForm()" class="btn-warning"
+                            style="margin-bottom:5px;">إلغاء</button>
+                    </div>
+                    <div class="filters">
+                        <div class="form-control"><label>بحث موظف</label><select id="advanceFilterEmp"
+                                onchange="renderDailyAdvances()"></select></div>
+                        <div class="form-control"><label>من</label><input type="date" id="advanceFilterFrom"
+                                onchange="renderDailyAdvances()"></div>
+                        <div class="form-control"><label>إلى</label><input type="date" id="advanceFilterTo"
+                                onchange="renderDailyAdvances()"></div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>التاريخ</th>
+                                    <th>رقم الموظف</th>
+                                    <th>اسم الموظف</th>
+                                    <th>الفرع</th>
+                                    <th>مبلغ السلفة</th>
+                                    <th>الملاحظات</th>
+                                    <th class="no-print">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="advanceTableBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -413,7 +477,8 @@
                         <div class="form-control" style="flex:1; min-width:180px;"><label>الأجر اليومي</label><input
                                 type="number" id="empWage"></div>
                         <!-- MODIFIED: إضافة حقل اختيار الدوام للموظف (لم يكن موجوداً في الكود الأصلي) -->
-                        <div class="form-control" style="flex:1; min-width:180px;"><label>الدوام</label><select id="empShift"></select></div>
+                        <div class="form-control" style="flex:1; min-width:180px;"><label>الدوام</label><select
+                                id="empShift"></select></div>
                     </div>
                     <button id="btnSaveEmp" onclick="saveEmployee()" style="margin-bottom: 5px;">حفظ الموظف</button>
                     <button onclick="resetEmpForm()" class="btn-warning" style="margin-bottom: 5px;">إلغاء</button>
@@ -426,21 +491,22 @@
                     <div class="form-control"><label>بحث بالاسم</label><input type="text" id="empFilterName"
                             onkeyup="renderEmployees()" placeholder="ابحث عن موظف..."></div>
                     <div style="display: flex; gap: 10px;">
-                        <button onclick="printEmployeesTable()" style="background-color: var(--primary);">🖨️ طباعة الجدول</button>
+                        <button onclick="printEmployeesTable()" style="background-color: var(--primary);">🖨️ طباعة
+                            الجدول</button>
                     </div>
                 </div>
                 <div class="table-wrapper">
                     <table>
                         <thead>
-                                <tr>
-                                    <th>رقم الموظف</th>
-                                    <th>الاسم</th>
-                                    <th>التاريخ</th>
-                                    <th>الفرع</th>
-                                    <th>الأجر</th>
-                                    <th>الرصيد</th>
-                                    <th>الدوام</th>
-                                    <th>إجراءات</th>
+                            <tr>
+                                <th>رقم الموظف</th>
+                                <th>الاسم</th>
+                                <th>التاريخ</th>
+                                <th>الفرع</th>
+                                <th>الأجر</th>
+                                <th>الرصيد</th>
+                                <th>الدوام</th>
+                                <th>إجراءات</th>
                             </tr>
                         </thead>
                         <tbody id="empTableBody"></tbody>
@@ -461,11 +527,11 @@
                 <div class="table-wrapper">
                     <table>
                         <thead>
-                                <tr>
-                                    <th>رقم الفرع</th>
-                                    <th>اسم الفرع</th>
-                                    <th>عنوان الفرع</th>
-                                    <th>إجراءات</th>
+                            <tr>
+                                <th>رقم الفرع</th>
+                                <th>اسم الفرع</th>
+                                <th>عنوان الفرع</th>
+                                <th>إجراءات</th>
                             </tr>
                         </thead>
                         <tbody id="branchesTableBody"></tbody>
@@ -599,8 +665,8 @@
                                 style="flex-direction: column; align-items: flex-start; max-width: 400px;">
                                 <div class="form-control" style="width: 100%;"><label>اسم الشركة</label><input
                                         type="text" id="settingsCompanyName"></div>
-                                <div class="form-control" style="width: 100%;"><label>شعار رأس الصفحة (اختيار ملف)</label><input
-                                    type="text" id="settingsLogo"></div>
+                                <div class="form-control" style="width: 100%;"><label>شعار رأس الصفحة (اختيار
+                                        ملف)</label><input type="text" id="settingsLogo"></div>
                                 <div class="form-control" style="width: 100%;"><label>حجم ورق الطباعة</label>
                                     <select id="settingsPaperSize">
                                         <option value="A4">A4</option>
@@ -680,7 +746,9 @@
                                 <!-- MODIFIED: إضافة قائمة اختيار الدوام لتسهيل تحديد الدوام قبل إضافة الفترات
                                      (الأصل: لم يكن هناك حقل اختيار مباشر؛ كان المستخدم يضغط على زر "تحديد" في الجدول) -->
                                 <div class="form-control" style="width:100%;"><label>اختر دوام لتعديل فتراته</label>
-                                    <select id="selectedShiftSelect"><option value="">اختر دواما</option></select>
+                                    <select id="selectedShiftSelect">
+                                        <option value="">اختر دواما</option>
+                                    </select>
                                 </div>
                                 <div style="display:flex; gap:10px; margin-top:8px;"><button id="btnSaveShift"
                                         onclick="saveShift()">حفظ الدوام</button><button class="btn-warning"
@@ -720,10 +788,10 @@
                                     <table>
                                         <thead>
                                             <tr>
-                                            <th>اسم الفترة</th>
-                                            <th>بداية</th>
-                                            <th>نهاية</th>
-                                            <th>إجراءات</th>
+                                                <th>اسم الفترة</th>
+                                                <th>بداية</th>
+                                                <th>نهاية</th>
+                                                <th>إجراءات</th>
                                             </tr>
                                         </thead>
                                         <tbody id="shiftPeriodsTableBody"></tbody>
@@ -775,73 +843,80 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- css للمعاينة -->
         <style>
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-            overflow: auto;
-        }
-        .modal-content {
-            background-color: #fefefe;
-            margin: 5% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 90%;
-            max-width: 1200px;
-            max-height: 90vh;
-            overflow: auto;
-            direction: rtl;
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
-        }
-        .modal-footer {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 20px;
-            border-top: 1px solid #ddd;
-            padding-top: 10px;
-        }
-        .close {
-            color: #aaa;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .close:hover,
-        .close:focus {
-            color: black;
-            text-decoration: none;
-        }
-        .print-preview-controls {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        .print-preview-content {
-            border: 1px solid #ddd;
-            padding: 15px;
-            background: white;
-            min-height: 400px;
-            overflow: auto;
-        }
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                overflow: auto;
+            }
+
+            .modal-content {
+                background-color: #fefefe;
+                margin: 5% auto;
+                padding: 20px;
+                border: 1px solid #888;
+                width: 90%;
+                max-width: 1200px;
+                max-height: 90vh;
+                overflow: auto;
+                direction: rtl;
+            }
+
+            .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #ddd;
+                padding-bottom: 10px;
+                margin-bottom: 15px;
+            }
+
+            .modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+                margin-top: 20px;
+                border-top: 1px solid #ddd;
+                padding-top: 10px;
+            }
+
+            .close {
+                color: #aaa;
+                font-size: 28px;
+                font-weight: bold;
+                cursor: pointer;
+            }
+
+            .close:hover,
+            .close:focus {
+                color: black;
+                text-decoration: none;
+            }
+
+            .print-preview-controls {
+                display: flex;
+                gap: 15px;
+                margin-bottom: 15px;
+                flex-wrap: wrap;
+            }
+
+            .print-preview-content {
+                border: 1px solid #ddd;
+                padding: 15px;
+                background: white;
+                min-height: 400px;
+                overflow: auto;
+            }
         </style>
-        
+
         <!-- csrf_token -->
         <script src="/assets/tageep/js/tageep.js?v=20260630-1"></script>
 </body>

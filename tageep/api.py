@@ -364,9 +364,34 @@ def _sign(payload):
 	return _b64encode(hmac.new(_token_secret(), payload.encode(), hashlib.sha256).digest())
 
 
-def _make_token(user_id):
+def _normalize_login_name(value):
+	return str(value or "").strip().lower()
+
+
+def _same_tageep_user(user, user_id=None, user_name=None):
+	if not isinstance(user, dict):
+		return False
+
+	if user_id and str(user.get("id") or "") == str(user_id):
+		return True
+
+	if user_name and _normalize_login_name(user.get("name")) == _normalize_login_name(user_name):
+		return True
+
+	return False
+
+
+def _make_token(user):
+	if isinstance(user, dict):
+		user_id = user.get("id")
+		user_name = user.get("name")
+	else:
+		user_id = user
+		user_name = None
+
 	payload = {
 		"user_id": user_id,
+		"user_name": user_name,
 		"exp": (datetime.utcnow() + timedelta(hours=TOKEN_TTL_HOURS)).isoformat(),
 		"nonce": secrets.token_urlsafe(12),
 	}
@@ -409,7 +434,7 @@ def _request_token():
 	return _get_payload_value("access_token")
 
 
-def _current_tageep_user():
+def _current_tageep_user(state=None):
 	# نتحقق من صحة التوكن ونفك الشيفرة لنحصل على هوية المستخدم.
 	payload = _parse_token(_request_token())
 	if not payload:
@@ -417,10 +442,15 @@ def _current_tageep_user():
 		frappe.throw(_("Invalid or expired Tageep session"), frappe.AuthenticationError)
 
 	user_id = payload.get("user_id")
-	user = next((item for item in _get_state().get("users", []) if item.get("id") == user_id), None)
+	user_name = payload.get("user_name")
+	state = state or _get_state()
+	user = next(
+		(item for item in state.get("users", []) if _same_tageep_user(item, user_id, user_name)),
+		None,
+	)
 	if not user:
 		frappe.local.response["http_status_code"] = 401
-		frappe.throw(_("Tageep user was not found"), frappe.AuthenticationError)
+		frappe.throw(_("Tageep user was not found. Please login again."), frappe.AuthenticationError)
 
 	return user
 
@@ -495,7 +525,7 @@ def login(username=None, password=None):
 		frappe.throw(_("Invalid username or password"), frappe.AuthenticationError)
 
 	# إذا نجح التحقق، نعيد توكن JWT مبني على HMAC ومعلومات المستخدم العامة.
-	return {"access_token": _make_token(user.get("id")), "user": _public_user(user)}
+	return {"access_token": _make_token(user), "user": _public_user(user)}
 
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
@@ -506,7 +536,8 @@ def get_state():
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def save_state(state=None):
-	user = _current_tageep_user()
+	current_state = _get_state()
+	user = _current_tageep_user(current_state)
 	if user.get("role") != "admin":
 		allowed_tabs = user.get("allowedTabs") or {}
 		permissions = user.get("tabPermissions") or {}
@@ -522,5 +553,13 @@ def save_state(state=None):
 		state = _get_payload_value("state")
 	if isinstance(state, str):
 		state = frappe.parse_json(state)
+
+	if isinstance(state, dict):
+		incoming_users = state.get("users")
+		current_users = current_state.get("users") or []
+		if not isinstance(incoming_users, list) or not any(
+			_same_tageep_user(item, user.get("id"), user.get("name")) for item in incoming_users
+		):
+			state["users"] = current_users
 
 	return _save_state(state)

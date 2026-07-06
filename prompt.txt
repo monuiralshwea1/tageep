@@ -1301,3 +1301,6 @@ python3 -m py_compile apps/tageep/tageep/api.py
 اريد تتاكد هل عند انشاء مستخدم من نوع مدير فرع اريد لا تظهر الموظفين الا الخاصة بهذا الفرع كذالك لا اريد يظهر الا الفرع المحدد لة 
 كذالك في واجهة التعقيب ليومي عند اختيار فرع  يظهر فقط الموظفين الخاصة بهذا الفرع 
 تاكد لي من هذه الخصائص هل جاهزة في التطبيق 
+///////////////////////
+امر الاستعلاد في قاعدة البيانات 
+$ bench --site alshumul.newsmart.local mariadb -e "select json_length(json_extract(state_json, '$.dailyAdvances')) as daily_advances_count from \`tabTageep App State\` where name='main

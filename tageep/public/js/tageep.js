@@ -9,6 +9,8 @@ const API_ROUTES = {
 };
 let backendAvailable = false;
 let isSavingRemote = false;
+let remoteSavePending = false;
+let remoteSavePromise = null;
 
 let db = {
     settings: { companyName: 'الشركة', logo: '', weeklyOffDays: ['5'], operationalDayStart: '06:00' },
@@ -146,16 +148,17 @@ function getFilteredEmployeesByBranch(branchId) {
 }
 
 // Enhanced saveDB with auto-refresh
-function saveDB() {
+function saveDB(options = {}) {
     try {
         localStorage.setItem('tageep_state', JSON.stringify(db));
     } catch (e) {
         console.warn('saveDB: local save failed', e);
     }
     // Try to persist to remote in background; don't block UI
-    persistRemoteState().catch(err => { console.warn('saveDB: remote persist failed', err); });
+    const remoteSave = persistRemoteState().catch(err => { console.warn('saveDB: remote persist failed', err); });
     // Auto-refresh the current view immediately
     refreshCurrentView();
+    return options.waitRemote ? remoteSave : undefined;
 }
 
 // دالة لتحديث الواجهة الحالية تلقائياً بعد الحفظ
@@ -527,25 +530,38 @@ async function loadRemoteState() {
 }
 
 async function persistRemoteState() {
-    if (isSavingRemote) return;
-    isSavingRemote = true;
-    try {
-        const state = await apiRequest(API_ROUTES.saveState, {
-            method: 'POST',
-            body: JSON.stringify({ state: db })
-        });
-        normalizeAppState(state);
-        backendAvailable = true;
-        console.info('State persisted to backend successfully.');
-    } catch (error) {
-        backendAvailable = false;
-        console.warn('API save failed:', error);
-        if (getAccessToken()) {
-            alert(`تعذر حفظ البيانات في قاعدة بيانات Frappe.\n${error.message || ''}`);
-        }
-    } finally {
-        isSavingRemote = false;
+    if (isSavingRemote) {
+        remoteSavePending = true;
+        return remoteSavePromise;
     }
+    isSavingRemote = true;
+    remoteSavePromise = (async () => {
+        try {
+            do {
+                remoteSavePending = false;
+                const state = await apiRequest(API_ROUTES.saveState, {
+                    method: 'POST',
+                    body: JSON.stringify({ state: db })
+                });
+                if (!remoteSavePending) {
+                    normalizeAppState(state);
+                }
+                backendAvailable = true;
+                console.info('State persisted to backend successfully.');
+            } while (remoteSavePending);
+        } catch (error) {
+            backendAvailable = false;
+            console.warn('API save failed:', error);
+            if (getAccessToken()) {
+                alert(`تعذر حفظ البيانات في قاعدة بيانات Frappe.\n${error.message || ''}`);
+            }
+        } finally {
+            isSavingRemote = false;
+            remoteSavePending = false;
+            remoteSavePromise = null;
+        }
+    })();
+    return remoteSavePromise;
 }
 
 async function getLicenseStatus() {
@@ -3380,7 +3396,7 @@ function renderDailyAdvances() {
     });
 }
 
-function saveDailyAdvance() {
+async function saveDailyAdvance() {
     if (!canPerform('daily', 'add') && !canPerform('daily', 'edit')) return alert('ليس لديك صلاحية لحفظ السلف');
     const id = document.getElementById('advanceEditId').value;
     const empId = document.getElementById('advanceEmp').value;
@@ -3401,8 +3417,18 @@ function saveDailyAdvance() {
         db.dailyAdvances = db.dailyAdvances || [];
         db.dailyAdvances.push(entry);
     }
+    const saveButton = document.getElementById('btnSaveAdvance');
+    const originalText = saveButton ? saveButton.innerText : '';
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.innerText = 'جاري الحفظ...';
+    }
+    await saveDB({ waitRemote: true });
+    if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.innerText = originalText || (id ? 'تحديث السلفة' : 'إضافة السلفة');
+    }
     resetDailyAdvanceForm();
-    saveDB();
 }
 
 function editDailyAdvance(id) {
@@ -3427,11 +3453,11 @@ function resetDailyAdvanceForm() {
     document.getElementById('btnSaveAdvance').innerText = 'إضافة السلفة';
 }
 
-function deleteDailyAdvance(id) {
+async function deleteDailyAdvance(id) {
     if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف السلفة');
     if (!confirm('هل تريد حذف هذه السلفة؟')) return;
     db.dailyAdvances = (db.dailyAdvances || []).filter(x => x.id !== id);
-    saveDB();
+    await saveDB({ waitRemote: true });
 }
 
 function switchDailyPanel(panelId) {

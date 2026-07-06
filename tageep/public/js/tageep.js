@@ -569,6 +569,8 @@ async function getLicenseStatus() {
 }
 
 function showLicense(message) {
+    const bootScreen = document.getElementById('bootScreen');
+    if (bootScreen) bootScreen.style.display = 'none';
     document.getElementById('licenseMessage').innerText = message || '';
     document.getElementById('licenseScreen').style.display = 'flex';
     document.getElementById('loginScreen').style.display = 'none';
@@ -1752,6 +1754,7 @@ function renderMainTable() {
 
     if (!filtered.length) {
         tbody.innerHTML = `<tr><td colspan="${totalCols}">لا توجد بيانات للعرض مع الفلاتر الحالية</td></tr>`;
+        refreshMainAndReportTablesUI();
         return;
     }
 
@@ -1925,7 +1928,10 @@ function renderMainTable() {
     tbody.innerHTML += `
         <tr style="font-weight:bold; background:#f0f0f0;">
             <td></td>
-            <td colspan="4">المجموع</td>
+            <td></td>
+            <td>المجموع</td>
+            <td></td>
+            <td></td>
             <!-- تعديل جديد: ترك خانة الأجر اليومي فارغة في صف المجموع لأنه حقل فردي لكل موظف -->
             <td></td>
             <td>${totalExpectedAll}</td>
@@ -1943,6 +1949,7 @@ function renderMainTable() {
             <td style="background:#e8f8f5;">${totalNetAll.toLocaleString()}</td>
             <td class="no-print"></td>
         </tr>`;
+    refreshMainAndReportTablesUI();
 }
 
 function getDayName(dateStr, short = false) {
@@ -2501,7 +2508,11 @@ function renderReportTable() {
     tbody.innerHTML += `
         <tr style="font-weight:bold; background:#f0f0f0;">
             <td></td>
-            <td colspan="5">المجموع</td>
+            <td></td>
+            <td>المجموع</td>
+            <td></td>
+            <td></td>
+            <td></td>
             <td></td>
             ${dynTotalsCells}
             <td style="color:green;">${totalActualAll}</td>
@@ -2513,6 +2524,7 @@ function renderReportTable() {
             <td>${db.dailyExtras.filter(x => x.date >= from && x.date <= to && filtered.some(emp => emp.id === x.empId)).reduce((sum, x) => sum + (parseFloat(x.amount) || 0), 0).toLocaleString()}</td>
             <td style="background:#e8f8f5;">${totalNetAll.toLocaleString()}</td>
         </tr>`;
+    refreshMainAndReportTablesUI();
 }
 
 // ========== CRUD EMPLOYEES ==========
@@ -4987,6 +4999,8 @@ function loadLoginState() {
 }
 
 function showLogin(message) {
+    const bootScreen = document.getElementById('bootScreen');
+    if (bootScreen) bootScreen.style.display = 'none';
     document.getElementById('loginMessage').innerText = message || '';
     document.getElementById('licenseScreen').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
@@ -4994,6 +5008,8 @@ function showLogin(message) {
 }
 
 function showApp() {
+    const bootScreen = document.getElementById('bootScreen');
+    if (bootScreen) bootScreen.style.display = 'none';
     document.getElementById('licenseScreen').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appRoot').style.display = 'block';
@@ -5057,7 +5073,27 @@ function forgotPassword() {
     alert('يرجى التواصل مع مدير النظام لإعادة تعيين كلمة المرور أو تحديث بيانات المستخدم.');
 }
 
+function showCachedAppIfPossible() {
+    const savedUserId = localStorage.getItem('appCurrentUserId');
+    const savedToken = localStorage.getItem('appAccessToken');
+    const local = localStorage.getItem('tageep_state');
+    if (!savedToken || !savedUserId || !local) return false;
+
+    try {
+        normalizeAppState(JSON.parse(local));
+        const savedUser = db.users.find(user => user.id === savedUserId);
+        if (!savedUser) return false;
+        currentUser = savedUser;
+        showApp();
+        return true;
+    } catch (error) {
+        console.warn('Failed to show cached Tageep state:', error);
+        return false;
+    }
+}
+
 async function bootApp() {
+    const showedCachedApp = showCachedAppIfPossible();
     try {
         const license = await getLicenseStatus();
         if (!license.active) {
@@ -5078,8 +5114,10 @@ async function bootApp() {
                 }
             } catch (sessionError) {
                 console.warn('Saved Tageep session is no longer valid:', sessionError);
+                if (showedCachedApp) return;
             }
         }
+        if (showedCachedApp) return;
         localStorage.removeItem('appAccessToken');
         localStorage.removeItem('appCurrentUserId');
         showLogin();
@@ -5121,10 +5159,14 @@ function enableColumnToggleForTable(table, tableKey) {
 
     // استرجاع الحالة المحفوظة
     const savedKey = `hideCols_${tableKey}`;
+    const savedKeysKey = `hideColKeys_${tableKey}`;
     let hiddenCols = [];
+    let hiddenColKeys = [];
     try {
         const saved = localStorage.getItem(savedKey);
         if (saved) hiddenCols = JSON.parse(saved);
+        const savedKeys = localStorage.getItem(savedKeysKey);
+        if (savedKeys) hiddenColKeys = JSON.parse(savedKeys);
     } catch (e) { }
 
     const headers = table.querySelectorAll('thead th, thead td');
@@ -5141,8 +5183,11 @@ function enableColumnToggleForTable(table, tableKey) {
         eyeBtn.title = 'إظهار/إخفاء العمود';
         eyeBtn.style.cssText = 'cursor:pointer;margin-right:4px;font-size:13px;user-select:none;display:inline-block;';
         eyeBtn.dataset.colIndex = idx;
+        eyeBtn.dataset.colKey = getColumnStorageKey(header, idx);
 
-        const isHidden = hiddenCols.includes(idx);
+        const isHidden = hiddenColKeys.length
+            ? hiddenColKeys.includes(eyeBtn.dataset.colKey)
+            : (!['main', 'report'].includes(tableKey) && hiddenCols.includes(idx));
         eyeBtn.textContent = isHidden ? '👁️‍🗨️' : '👁️';
         if (isHidden) eyeBtn.style.opacity = '0.5';
 
@@ -5150,7 +5195,7 @@ function enableColumnToggleForTable(table, tableKey) {
             e.preventDefault();
             e.stopPropagation();
             const colIdx = parseInt(this.dataset.colIndex);
-            toggleColumn(table, tableKey, colIdx, this);
+            toggleColumn(table, tableKey, colIdx, this, this.dataset.colKey);
         });
 
         // إضافة الزر قبل نص العنوان
@@ -5177,20 +5222,35 @@ function enableColumnToggleForTable(table, tableKey) {
     }
 }
 
+function getColumnStorageKey(header, idx) {
+    const clone = header.cloneNode(true);
+    clone.querySelectorAll('.col-toggle-btn, .sort-arrow').forEach(el => el.remove());
+    const label = clone.textContent.replace(/\s+/g, ' ').trim();
+    return label ? `label:${label}` : `index:${idx}`;
+}
+
 // تبديل إخفاء/إظهار عمود
-function toggleColumn(table, tableKey, colIndex, eyeBtn) {
+function toggleColumn(table, tableKey, colIndex, eyeBtn, colKey) {
     const savedKey = `hideCols_${tableKey}`;
+    const savedKeysKey = `hideColKeys_${tableKey}`;
     let hiddenCols = [];
+    let hiddenColKeys = [];
     try {
         const saved = localStorage.getItem(savedKey);
         if (saved) hiddenCols = JSON.parse(saved);
+        const savedKeys = localStorage.getItem(savedKeysKey);
+        if (savedKeys) hiddenColKeys = JSON.parse(savedKeys);
     } catch (e) { }
 
-    const isCurrentlyHidden = hiddenCols.includes(colIndex);
+    const key = colKey || (eyeBtn && eyeBtn.dataset.colKey) || getColumnStorageKey(table.querySelectorAll('thead th, thead td')[colIndex], colIndex);
+    const isCurrentlyHidden = hiddenColKeys.length
+        ? hiddenColKeys.includes(key)
+        : (!['main', 'report'].includes(tableKey) && hiddenCols.includes(colIndex));
 
     if (isCurrentlyHidden) {
         // إظهار العمود
         hiddenCols = hiddenCols.filter(i => i !== colIndex);
+        hiddenColKeys = hiddenColKeys.filter(item => item !== key);
         setColumnVisibility(table, colIndex, true);
         if (eyeBtn) {
             eyeBtn.textContent = '👁️';
@@ -5199,6 +5259,7 @@ function toggleColumn(table, tableKey, colIndex, eyeBtn) {
     } else {
         // إخفاء العمود
         hiddenCols.push(colIndex);
+        hiddenColKeys.push(key);
         setColumnVisibility(table, colIndex, false);
         if (eyeBtn) {
             eyeBtn.textContent = '👁️‍🗨️';
@@ -5206,7 +5267,8 @@ function toggleColumn(table, tableKey, colIndex, eyeBtn) {
         }
     }
 
-    localStorage.setItem(savedKey, JSON.stringify(hiddenCols));
+    localStorage.setItem(savedKey, JSON.stringify([...new Set(hiddenCols)]));
+    localStorage.setItem(savedKeysKey, JSON.stringify([...new Set(hiddenColKeys)]));
 }
 
 // تطبيق الإخفاء/الإظهار على جميع خلايا العمود
@@ -5223,7 +5285,9 @@ function setColumnVisibility(table, colIndex, visible) {
 // إعادة تعيين جميع الأعمدة المخفية
 function resetAllColumns(table, tableKey) {
     const savedKey = `hideCols_${tableKey}`;
+    const savedKeysKey = `hideColKeys_${tableKey}`;
     localStorage.removeItem(savedKey);
+    localStorage.removeItem(savedKeysKey);
 
     // إظهار جميع الأعمدة
     const rows = table.querySelectorAll('tr');
@@ -5252,6 +5316,50 @@ function enableColumnToggleForAllTables() {
     if (reportTable) enableColumnToggleForTable(reportTable, 'report');
 }
 
+function applySavedColumnVisibilityForTable(table, tableKey) {
+    if (!table) return;
+    const savedKey = `hideCols_${tableKey}`;
+    const savedKeysKey = `hideColKeys_${tableKey}`;
+    let hiddenCols = [];
+    let hiddenColKeys = [];
+    try {
+        const saved = localStorage.getItem(savedKey);
+        if (saved) hiddenCols = JSON.parse(saved);
+        const savedKeys = localStorage.getItem(savedKeysKey);
+        if (savedKeys) hiddenColKeys = JSON.parse(savedKeys);
+    } catch (e) { }
+
+    const headerCells = table.querySelectorAll('thead th, thead td');
+    headerCells.forEach((header, idx) => {
+        const key = getColumnStorageKey(header, idx);
+        const isHidden = hiddenColKeys.length
+            ? hiddenColKeys.includes(key)
+            : (!['main', 'report'].includes(tableKey) && hiddenCols.includes(idx));
+        setColumnVisibility(table, idx, !isHidden);
+        const eyeBtn = header.querySelector('.col-toggle-btn');
+        if (eyeBtn) {
+            eyeBtn.dataset.colIndex = idx;
+            eyeBtn.dataset.colKey = key;
+            eyeBtn.textContent = isHidden ? '👁️‍🗨️' : '👁️';
+            eyeBtn.style.opacity = isHidden ? '0.5' : '1';
+        }
+    });
+}
+
+function refreshMainAndReportTablesUI() {
+    const mainTable = document.querySelector('#attendance-panel .table-wrapper table');
+    if (mainTable) {
+        applySavedColumnVisibilityForTable(mainTable, 'main');
+        makeTableSortable(mainTable);
+    }
+
+    const reportTable = document.querySelector('#report-panel .table-wrapper table');
+    if (reportTable) {
+        applySavedColumnVisibilityForTable(reportTable, 'report');
+        makeTableSortable(reportTable);
+    }
+}
+
 // ========== فرز الأعمدة في الجداول (تصاعدي / تنازلي) ==========
 // حالة الفرز العالمية
 const sortState = {};
@@ -5263,6 +5371,9 @@ function sortTableData(table, colIndex) {
     const tbody = tbl.querySelector('tbody');
     if (!tbody) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.forEach((row, idx) => {
+        if (!row.dataset.originalSortIndex) row.dataset.originalSortIndex = String(idx);
+    });
     // استبعاد صف المجموع إن وجد (يبحث في جميع الخلايا عن نص "المجموع")
     let totalRow = null;
     if (rows.length > 0) {
@@ -5279,26 +5390,31 @@ function sortTableData(table, colIndex) {
     // مفتاح الحالة
     const stateKey = tbl.id || ('table_' + Math.random().toString(36).slice(2, 8));
     if (!tbl._sortKey) tbl._sortKey = stateKey;
-    if (!sortState[stateKey]) sortState[stateKey] = {};
-    const currentDir = sortState[stateKey][colIndex] || 'none';
-    const newDir = currentDir === 'asc' ? 'desc' : 'asc';
-    sortState[stateKey][colIndex] = newDir;
+    if (!sortState[stateKey]) sortState[stateKey] = { colIndex: null, direction: 'none' };
+    const currentState = sortState[stateKey];
+    const currentDir = currentState.colIndex === colIndex ? currentState.direction : 'none';
+    const newDir = currentDir === 'none' ? 'asc' : (currentDir === 'asc' ? 'desc' : 'none');
+    sortState[stateKey] = { colIndex: newDir === 'none' ? null : colIndex, direction: newDir };
 
     // فرز الصفوف
-    rows.sort((a, b) => {
-        const aText = (a.cells[colIndex]?.textContent || '').trim();
-        const bText = (b.cells[colIndex]?.textContent || '').trim();
-        // محاولة المقارنة كأرقام
-        const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
-        const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
-        let result;
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-            result = aNum - bNum;
-        } else {
-            result = aText.localeCompare(bText, 'ar');
-        }
-        return newDir === 'asc' ? result : -result;
-    });
+    if (newDir === 'none') {
+        rows.sort((a, b) => (parseInt(a.dataset.originalSortIndex, 10) || 0) - (parseInt(b.dataset.originalSortIndex, 10) || 0));
+    } else {
+        rows.sort((a, b) => {
+            const aText = (a.cells[colIndex]?.textContent || '').trim();
+            const bText = (b.cells[colIndex]?.textContent || '').trim();
+            // محاولة المقارنة كأرقام
+            const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
+            const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
+            let result;
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                result = aNum - bNum;
+            } else {
+                result = aText.localeCompare(bText, 'ar');
+            }
+            return newDir === 'asc' ? result : -result;
+        });
+    }
 
     // إعادة بناء tbody
     tbody.innerHTML = '';
@@ -5309,10 +5425,11 @@ function sortTableData(table, colIndex) {
     const headerCells = tbl.querySelectorAll('thead th, thead td');
     headerCells.forEach((cell, idx) => {
         cell.classList.remove('sort-asc', 'sort-desc');
-        if (idx === colIndex) {
+        if (idx === colIndex && newDir !== 'none') {
             cell.classList.add(newDir === 'asc' ? 'sort-asc' : 'sort-desc');
         }
     });
+    return newDir;
 }
 
 // تفعيل الفرز على جميع جداول الصفحة
@@ -5340,7 +5457,7 @@ function enableTableSorting() {
 
 // جعل جدول معين قابلاً للفرز
 function makeTableSortable(table) {
-    if (!table || table.dataset.sortable === 'true') return;
+    if (!table) return;
     table.dataset.sortable = 'true';
 
     const headers = table.querySelectorAll('thead th, thead td');
@@ -5368,14 +5485,13 @@ function makeTableSortable(table) {
         header._sortHandler = function (e) {
             e.stopPropagation();
             // فرز الجدول
-            sortTableData(table, idx);
+            const newDir = sortTableData(table, idx);
             // تحديث الأسهم
             headers.forEach((h, i) => {
                 const arrowSpan = h.querySelector('.sort-arrow');
                 if (arrowSpan) {
-                    if (i === idx) {
-                        const isAsc = h.classList.contains('sort-asc');
-                        arrowSpan.textContent = isAsc ? ' ↑' : ' ↓';
+                    if (i === idx && newDir !== 'none') {
+                        arrowSpan.textContent = newDir === 'asc' ? ' ↑' : ' ↓';
                         arrowSpan.style.color = '#27ae60';
                     } else {
                         arrowSpan.textContent = ' ⇅';

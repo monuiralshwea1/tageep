@@ -100,8 +100,6 @@
                         onclick="switchMainPanel('attendance-panel')">التعقيب</button>
                     <button class="sub-tab-btn" data-main-panel="report-panel"
                         onclick="switchMainPanel('report-panel')">التقارير</button>
-                    <button class="sub-tab-btn" data-main-panel="summary-panel"
-                        onclick="switchMainPanel('summary-panel')">الإيضاحي</button>
                 </div>
 
                 <div id="attendance-panel" class="main-panel active">
@@ -255,54 +253,6 @@
                                 </tr>
                             </thead>
                             <tbody id="reportTableBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-                <!-- ===== لوحة الإيضاحي الجديدة (خارج report-panel) ===== -->
-                <div id="summary-panel" class="main-panel">
-                    <div class="filters">
-                        <div class="form-control">
-                            <label>من تاريخ:</label>
-                            <input type="date" id="summaryFrom" onchange="renderSummaryTable()">
-                        </div>
-                        <div class="form-control">
-                            <label>إلى تاريخ:</label>
-                            <input type="date" id="summaryTo" onchange="renderSummaryTable()">
-                        </div>
-                        <div class="form-control">
-                            <label>الفرع:</label>
-                            <select id="summaryBranch" onchange="renderSummaryTable()">
-                                <option value="all">الكل</option>
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label>الموظف:</label>
-                            <select id="summaryEmp" onchange="renderSummaryTable()">
-                                <option value="all">الكل</option>
-                            </select>
-                        </div>
-                        <div style="display: flex; gap: 10px;">
-                            <button onclick="renderSummaryTable()" style="background-color: var(--primary);">عرض الجدول</button>
-                            <button onclick="printSummaryTable()" style="background-color:#607d8b; margin-left:8px;">🖨️ طباعة الجدول</button>
-                            <button onclick="previewSummaryTable()" style="background-color:#2ecc71; margin-left:8px;">👁️ معاينة الطباعة</button>
-                        </div>
-                    </div>
-                    <div id="summaryDateRange" style="text-align:center; font-size:14px; font-weight:bold; margin:10px 0;"></div>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>البيان</th>
-                                    <th>عدد الأيام الفعلية</th>
-                                    <th>عدد الموظفين</th>
-                                    <th>إجمالي عدد الأيام</th>
-                                    <th>إجمالي المبالغ</th>
-                                    <th>فارق الأيام</th>
-                                    <th>فارق الموظفين</th>
-                                    <th>الملاحظات</th>
-                                </tr>
-                            </thead>
-                            <tbody id="summaryTableBody"></tbody>
                         </table>
                     </div>
                 </div>

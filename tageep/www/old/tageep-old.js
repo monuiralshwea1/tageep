@@ -294,19 +294,6 @@ function refreshAllDropdowns() {
         }
     }
 
-    // تعبئة قائمة الموظفين في فلتر الإيضاحي (كل الموظفين)
-    const summaryEmpEl = document.getElementById('summaryEmp');
-    if (summaryEmpEl) {
-        const savedVal = summaryEmpEl.value;
-        summaryEmpEl.innerHTML = '<option value="all">الكل</option>';
-        db.employees.forEach(e => {
-            summaryEmpEl.innerHTML += `<option value="${e.id}">${e.name}</option>`;
-        });
-        if (savedVal && db.employees.find(e => e.id === savedVal)) {
-            summaryEmpEl.value = savedVal;
-        }
-    }
-
     // تحديد الفروع حسب المستخدم
     const isBranchUser = currentUser && currentUser.role !== 'admin';
     const userBranchId = isBranchUser ? currentUser.branchId : null;
@@ -322,8 +309,7 @@ function refreshAllDropdowns() {
         document.getElementById('dailyFilterBranch'),
         document.getElementById('archiveFilterBranch'),
         document.getElementById('reportBranch'),
-        document.getElementById('sentFilterBranch'),
-        document.getElementById('summaryBranch')
+        document.getElementById('sentFilterBranch')
     ];
     branchSelects.forEach(select => {
         if (!select) return;
@@ -1288,8 +1274,6 @@ function switchMainPanel(panelId) {
         renderMainTable();
     } else if (panelId === 'report-panel') {
         renderReportTable();
-    } else if (panelId === 'summary-panel') {
-        renderSummaryTable();
     }
     // إعادة تفعيل إظهار/إخفاء الأعمدة بعد التبديل
     setTimeout(enableColumnToggleForAllTables, 100);
@@ -1343,8 +1327,7 @@ function renderAll() {
         document.getElementById('userBranch'),
         document.getElementById('dailyBranch'),
         document.getElementById('dailyFilterBranch'),
-        document.getElementById('archiveFilterBranch'),
-        document.getElementById('summaryBranch')
+        document.getElementById('archiveFilterBranch')
     ];
     branchSelects.forEach(select => {
         if (!select) return;
@@ -1404,19 +1387,6 @@ function renderAll() {
     }
 
     populateEmployeeSelects();
-
-    // تعبئة قائمة الموظفين في فلتر الإيضاحي
-    const summaryEmpRender = document.getElementById('summaryEmp');
-    if (summaryEmpRender) {
-        const savedVal = summaryEmpRender.value;
-        summaryEmpRender.innerHTML = '<option value="all">الكل</option>';
-        db.employees.forEach(e => {
-            summaryEmpRender.innerHTML += `<option value="${e.id}">${e.name}</option>`;
-        });
-        if (savedVal && db.employees.find(e => e.id === savedVal)) {
-            summaryEmpRender.value = savedVal;
-        }
-    }
 
     // عند تغيير الفرع في التعقيب اليومي، تحديث قوائم الموظفين
     const dailyBranchEl = document.getElementById('dailyBranch');
@@ -2543,322 +2513,6 @@ function renderReportTable() {
     refreshMainAndReportTablesUI();
 }
 
-// ===== جدول الإيضاحي: إحصاءات مقارنة بين الأسبوع الماضي والحالي =====
-function renderSummaryTable() {
-    const tbody = document.getElementById('summaryTableBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    const branchId = document.getElementById('summaryBranch')?.value || 'all';
-    const empId = document.getElementById('summaryEmp')?.value || 'all';
-    let from = document.getElementById('summaryFrom')?.value || '';
-    let to = document.getElementById('summaryTo')?.value || '';
-
-    // إذا لم يتم تحديد تاريخ، نحدد نطاق افتراضي: من بداية الأسبوع الماضي إلى نهاية الأسبوع الحالي
-    if (!from || !to) {
-        const today = new Date();
-        const currentDay = today.getDay(); // 0=Sunday
-        // نهاية الأسبوع الحالي = السبت (إذا كانت الجمعة 5 هي العطلة)
-        const daysToEndOfWeek = (currentDay <= 5) ? (5 - currentDay) : (5 + 7 - currentDay);
-        const endOfCurrentWeek = new Date(today);
-        endOfCurrentWeek.setDate(today.getDate() + daysToEndOfWeek);
-        to = endOfCurrentWeek.toISOString().split('T')[0];
-
-        // بداية الأسبوع الماضي = بداية الأسبوع الحالي - 14 يوم
-        const startOfCurrentWeek = new Date(endOfCurrentWeek);
-        startOfCurrentWeek.setDate(endOfCurrentWeek.getDate() - 6);
-        // بداية الأسبوع الماضي = بداية الأسبوع الحالي - 7 أيام
-        const startOfLastWeek = new Date(startOfCurrentWeek);
-        startOfLastWeek.setDate(startOfCurrentWeek.getDate() - 7);
-        from = startOfLastWeek.toISOString().split('T')[0];
-
-        document.getElementById('summaryFrom').value = from;
-        document.getElementById('summaryTo').value = to;
-    }
-
-    // عرض نطاق التاريخ
-    const dateRangeEl = document.getElementById('summaryDateRange');
-    if (dateRangeEl) {
-        dateRangeEl.innerText = `نطاق التقرير: من ${from} إلى ${to}`;
-    }
-
-    // حساب طول الفترة بالأيام التقويمية
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    const totalDays = Math.ceil((toDate - fromDate) / (1000 * 60 * 60 * 24)) + 1;
-
-    // نقسم الفترة إلى نصفين: الأسبوع الماضي والأسبوع الحالي
-    const midDate = new Date(fromDate);
-    midDate.setDate(fromDate.getDate() + Math.floor(totalDays / 2));
-    const midStr = midDate.toISOString().split('T')[0];
-
-    const lastWeekFrom = from;
-    const lastWeekTo = midStr;
-    const currentWeekFrom = new Date(midDate);
-    currentWeekFrom.setDate(midDate.getDate() + 1);
-    const currentWeekFromStr = currentWeekFrom.toISOString().split('T')[0];
-    const currentWeekTo = to;
-
-    // الموظفين المصفين
-    const filteredEmps = db.employees.filter(emp => {
-        if (branchId !== 'all' && emp.branchId !== branchId) return false;
-        if (empId !== 'all' && emp.id !== empId) return false;
-        return true;
-    });
-
-    // دوال مساعدة لحساب الإحصائيات
-    function calcStats(frm, t) {
-        const workingDates = getWorkingDatesBetween(frm, t);
-        const expectedDays = workingDates.length;
-        let totalActualDays = 0;
-        let totalExpectedAll = 0;
-        let totalEmployees = 0;
-        let totalAmount = 0;
-        const empCountSet = new Set();
-
-        filteredEmps.forEach(emp => {
-            const totals = getAbsenceTotalsForEmployee(emp, frm, t);
-            const absenceDays = totals.absenceDays;
-            const annualDays = totals.annualDays;
-            const otherLeaveDays = totals.otherLeaveDays;
-            const holidayPresent = totals.holidayPresent;
-            const actualDays = Math.max(0, expectedDays - absenceDays - annualDays - otherLeaveDays + holidayPresent);
-            const dayWage = parseFloat(emp.wage) || 0;
-            const amount = actualDays * dayWage;
-
-            totalExpectedAll += expectedDays;
-            totalActualDays += actualDays;
-            totalAmount += amount;
-            if (actualDays > 0 || absenceDays > 0 || annualDays > 0) {
-                totalEmployees++;
-                empCountSet.add(emp.id);
-            }
-        });
-
-        return {
-            expectedDays: totalExpectedAll,
-            actualDays: totalActualDays,
-            employeeCount: empCountSet.size,
-            amount: totalAmount
-        };
-    }
-
-    const lastWeekStats = calcStats(lastWeekFrom, lastWeekTo);
-    const currentWeekStats = calcStats(currentWeekFromStr, currentWeekTo);
-    const actualStats = calcStats(from, to);
-
-    // حساب المتوقع (كل الموظفين × أيام العمل)
-    const workingDates = getWorkingDatesBetween(from, to);
-    const expectedDaysAll = workingDates.length * filteredEmps.length;
-    const lastWeekWorking = getWorkingDatesBetween(lastWeekFrom, lastWeekTo);
-    const lastWeekExpected = lastWeekWorking.length * filteredEmps.length;
-    const currentWeekWorking = getWorkingDatesBetween(currentWeekFromStr, currentWeekTo);
-    const currentWeekExpected = currentWeekWorking.length * filteredEmps.length;
-
-    // بناء الصفوف
-    const rows = [
-        {
-            label: 'الأسبوع الماضي المتوقع',
-            actualDays: '-',
-            empCount: filteredEmps.length || '-',
-            totalDays: lastWeekExpected || '-',
-            amount: '-',
-            dayDiff: '-',
-            empDiff: '-',
-            notes: 'المتوقع بناءً على أيام العمل'
-        },
-        {
-            label: 'الأسبوع الحالي المتوقع',
-            actualDays: '-',
-            empCount: filteredEmps.length || '-',
-            totalDays: currentWeekExpected || '-',
-            amount: '-',
-            dayDiff: '-',
-            empDiff: '-',
-            notes: 'المتوقع بناءً على أيام العمل'
-        },
-        {
-            label: 'الأسبوع الماضي الفعلي',
-            actualDays: lastWeekStats.actualDays || 0,
-            empCount: lastWeekStats.employeeCount || 0,
-            totalDays: lastWeekStats.expectedDays || 0,
-            amount: lastWeekStats.amount || 0,
-            dayDiff: lastWeekExpected > 0 ? (lastWeekStats.actualDays - lastWeekExpected) : '-',
-            empDiff: filteredEmps.length > 0 ? (lastWeekStats.employeeCount - filteredEmps.length) : '-',
-            notes: `من ${lastWeekFrom} إلى ${lastWeekTo}`
-        },
-        {
-            label: 'الأسبوع الحالي الفعلي',
-            actualDays: currentWeekStats.actualDays || 0,
-            empCount: currentWeekStats.employeeCount || 0,
-            totalDays: currentWeekStats.expectedDays || 0,
-            amount: currentWeekStats.amount || 0,
-            dayDiff: currentWeekExpected > 0 ? (currentWeekStats.actualDays - currentWeekExpected) : '-',
-            empDiff: filteredEmps.length > 0 ? (currentWeekStats.employeeCount - filteredEmps.length) : '-',
-            notes: `من ${currentWeekFromStr} إلى ${currentWeekTo}`
-        }
-    ];
-
-    rows.forEach(row => {
-        const formatNum = (val) => {
-            if (val === '-' || val === undefined || val === null) return '-';
-            if (typeof val === 'number') return val.toLocaleString('ar-EG', { maximumFractionDigits: 1 });
-            return val;
-        };
-        const formatAmount = (val) => {
-            if (val === '-' || val === undefined || val === null) return '-';
-            if (typeof val === 'number') return val.toLocaleString('ar-EG', { maximumFractionDigits: 2 });
-            return val;
-        };
-        const diffClass = (val) => {
-            if (val === '-' || val === undefined || val === null) return '';
-            if (typeof val === 'number') {
-                return val < 0 ? 'style="color:red;font-weight:bold;"' : 'style="color:green;font-weight:bold;"';
-            }
-            return '';
-        };
-
-        tbody.innerHTML += `
-            <tr>
-                <td style="font-weight:bold;text-align:right;">${row.label}</td>
-                <td contenteditable="true" style="cursor:text;">${formatNum(row.actualDays)}</td>
-                <td contenteditable="true" style="cursor:text;">${formatNum(row.empCount)}</td>
-                <td contenteditable="true" style="cursor:text;">${formatNum(row.totalDays)}</td>
-                <td contenteditable="true" style="cursor:text;">${formatAmount(row.amount)}</td>
-                <td ${diffClass(row.dayDiff)} contenteditable="true" style="cursor:text;">${formatNum(row.dayDiff)}</td>
-                <td ${diffClass(row.empDiff)} contenteditable="true" style="cursor:text;">${formatNum(row.empDiff)}</td>
-                <td contenteditable="true" style="font-size:12px;color:#666;cursor:text;">${row.notes}</td>
-            </tr>`;
-    });
-
-    // تحديث نطاق التاريخ للطباعة
-    const printDateRange = document.getElementById('printDateRange');
-    if (printDateRange) {
-        printDateRange.innerText = `جدول إيضاحي - من ${from} إلى ${to}`;
-    }
-}
-
-// دالة طباعة جدول الإيضاحي
-function printSummaryTable() {
-    const table = document.querySelector('#summary-panel .table-wrapper table');
-    if (!table) return alert('لا يوجد جدول للطباعة');
-
-    const from = document.getElementById('summaryFrom')?.value || '';
-    const to = document.getElementById('summaryTo')?.value || '';
-    const title = `جدول إيضاحي - من ${from} إلى ${to}`;
-
-    const companyName = db.settings.companyName || '';
-    const logoUrl = db.settings.logo || '';
-    const logoHtml = logoUrl
-        ? `<img src="${logoUrl}" style="width:100%;height:auto;max-height:60px;object-fit:contain;display:block;margin:0 auto 8px;" alt="شعار الشركة">`
-        : '';
-
-    const orientation = localStorage.getItem('tageep_orientation') || 'landscape';
-    const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
-
-    const paperSizeStyles = {
-        'A4': { width: '210mm', height: '297mm' },
-        'A5': { width: '148mm', height: '210mm' },
-        'Letter': { width: '216mm', height: '279mm' },
-        'Legal': { width: '216mm', height: '356mm' }
-    };
-    const selectedSize = paperSizeStyles[paperSize] || paperSizeStyles['A4'];
-    const isPortrait = orientation === 'portrait';
-    const fontSize = isPortrait ? '8px' : '10px';
-    const cellPadding = isPortrait ? '2px 3px' : '4px 6px';
-    const headerFontSize = isPortrait ? '9px' : '11px';
-
-    const tableClone = table.cloneNode(true);
-
-    const firstRow = tableClone.querySelector('tr');
-    const colCount = firstRow ? firstRow.cells.length : 1;
-
-    const originalThead = tableClone.querySelector('thead');
-    let columnHeadersHtml = '';
-    if (originalThead) {
-        columnHeadersHtml = originalThead.querySelector('tr').outerHTML;
-    }
-
-    const headerRowHtml = `<tr style="display:table-row;">
-        <td colspan="${colCount}" style="text-align:center;border:0!important;padding:0!important;">
-            ${logoHtml}
-            <div style="font-size:16px;font-weight:bold;margin:3px 0;">${companyName}</div>
-            <div style="font-size:14px;font-weight:bold;margin:2px 0;">${title}</div>
-        </td>
-    </tr>`;
-
-    const fullTheadHtml = `<thead>${headerRowHtml}${columnHeadersHtml}</thead>`;
-    const tableHtml = tableClone.outerHTML;
-    const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
-
-    const printContent = `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>${title}</title>
-    <style>
-        @page { size: ${orientation === 'landscape' ? selectedSize.height + ' ' + selectedSize.width : selectedSize.width + ' ' + selectedSize.height}; margin: 10mm; }
-        body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; margin: 0; padding: 0; }
-        table { width: 100%; border-collapse: collapse; font-size: ${fontSize}; }
-        th, td { padding: ${cellPadding}; text-align: center; border: 1px solid #000; word-break: keep-all; }
-        th { background-color: #dcedc8; font-weight: bold; font-size: ${headerFontSize}; }
-        thead { display: table-header-group; }
-        thead th, thead td { position: static !important; }
-        thead img { max-height: 50px !important; }
-        tr { page-break-inside: auto; break-inside: auto; }
-        tbody tr { orphans: 2; widows: 2; }
-    </style>
-</head>
-<body>
-    ${finalHtml}
-</body>
-</html>`;
-
-    const printWindow = window.open('', '_blank', 'width=1024,height=768');
-    if (!printWindow) {
-        const printFrame = document.createElement('iframe');
-        printFrame.style.position = 'fixed';
-        printFrame.style.top = '-9999px';
-        printFrame.style.left = '-9999px';
-        printFrame.style.width = '0';
-        printFrame.style.height = '0';
-        document.body.appendChild(printFrame);
-
-        const iframeDoc = printFrame.contentDocument || printFrame.contentWindow.document;
-        iframeDoc.open();
-        iframeDoc.write(printContent);
-        iframeDoc.close();
-
-        setTimeout(() => {
-            try { printFrame.contentWindow.print(); } catch (e) { window.print(); }
-            setTimeout(() => { document.body.removeChild(printFrame); }, 1000);
-        }, 500);
-        return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    setTimeout(() => { printWindow.print(); }, 1000);
-}
-
-// دالة معاينة طباعة جدول الإيضاحي
-function previewSummaryTable() {
-    const table = document.querySelector('#summary-panel .table-wrapper table');
-    if (!table) { alert('لا يوجد جدول للطباعة'); return; }
-
-    const from = document.getElementById('summaryFrom')?.value || '';
-    const to = document.getElementById('summaryTo')?.value || '';
-    const title = `جدول إيضاحي - من ${from} إلى ${to}`;
-
-    const printTitleEl = document.getElementById('printTitle');
-    if (printTitleEl) printTitleEl.innerText = title;
-
-    document.getElementById('printPreviewModal').style.display = 'block';
-    // استخدام updatePrintPreview بعد تعديل العنوان
-    updatePrintPreviewWithTitle(title);
-}
-
 // ========== CRUD EMPLOYEES ==========
 function saveEmployee() {
     const id = document.getElementById('empEditId').value;
@@ -3483,7 +3137,7 @@ function renderDailyFollowups() {
         const rowNum = rowIdx + 1;
         const employee = db.employees.find(e => e.id === item.empId) || { name: '' };
         const branchName = db.branches.find(b => b.id === item.branchId)?.name || '';
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);
@@ -3963,8 +3617,8 @@ function editSentReport(reportId) {
     const entries = report.entries || [];
     entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusOptions = ['present', 'absent', 'annual', 'other_leave', 'holiday_present']
-            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : s === 'other_leave' ? 'إجازة أخرى' : 'مناسبة'
+        const statusOptions = ['present', 'absent', 'annual', 'holiday_present']
+            .map(s => `<option value="${s}" ${item.statusType === s ? 'selected' : ''}>${s === 'present' ? 'حاضر' : s === 'absent' ? 'غائب' : s === 'annual' ? 'إجازة سنوية' : 'مناسبة'
                 }</option>`).join('');
 
         let periodOptions = '<option value="all">الكل</option>';
@@ -4112,7 +3766,7 @@ function saveSentReportEdits(reportId) {
     changes.forEach((c, i) => {
         const emp = findEmployeeById(c.empId);
         const empName = emp ? emp.name : c.empId;
-        const statusLabels = { present: 'حاضر', absent: 'غائب', annual: 'إجازة سنوية', other_leave: 'إجازة أخرى', holiday_present: 'مناسبة' };
+        const statusLabels = { present: 'حاضر', absent: 'غائب', annual: 'إجازة سنوية', holiday_present: 'مناسبة' };
         const dateChanged = c.oldDate !== c.newDate ? ` (${c.oldDate} → ${c.newDate})` : ` (${c.oldDate})`;
         summaryMsg += i + 1 + '. ' + empName + dateChanged + ': ' + (statusLabels[c.oldStatus] || c.oldStatus) + ' → ' + (statusLabels[c.newStatus] || c.newStatus) + '\n';
     });
@@ -4192,7 +3846,7 @@ function previewSentReport(reportId) {
     let tableRows = '';
     (report.entries || []).forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);
@@ -4331,7 +3985,7 @@ function viewSentReport(reportId) {
 
     report.entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);
@@ -4391,7 +4045,7 @@ function viewArchivedReport(reportId) {
     const entries = report.entries || [];
     entries.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);
@@ -4493,7 +4147,7 @@ function buildArchivePdf(reportId, branchName, records) {
     let tableRows = '';
     records.forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);
@@ -5023,7 +4677,7 @@ function previewArchivedReport(reportId) {
     let tableRows = '';
     (report.entries || []).forEach((item, idx) => {
         const employee = db.employees.find(e => e.id === item.empId) || { name: '-', employeeNumber: '-' };
-        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : item.statusType === 'other_leave' ? 'إجازة أخرى' : 'مناسبة';
+        const statusLabel = item.statusType === 'present' ? 'حاضر' : item.statusType === 'absent' ? 'غائب' : item.statusType === 'annual' ? 'إجازة سنوية' : 'مناسبة';
         let periodLabel = 'الكل';
         if (item.period && item.period !== 'all') {
             const emp = db.employees.find(e => e.id === item.empId);

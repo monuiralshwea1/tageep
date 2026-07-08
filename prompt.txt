@@ -1335,3 +1335,10 @@ $ bench --site alshumul.newsmart.local mariadb -e "select json_length(json_extra
 التحقق:
 شغلت node --check apps/tageep/tageep/public/js/tageep.js ونجح بدون أخطاء.
 على السيرفر نفذ بعد رفع الملفات:
+///////////////////////////////تعديلات يوم 8/7/2026
+بعد التعديلات الاخيره ظهر هذا الخطاء عند فتح النظام 
+تعذر الاتصال بالباكند
+تأكد أن خادم Frappe يعمل وأن تطبيق tageep مثبت على الموقع، ثم أعد تحميل الصفحة.
+
+رابط اختبار API: /api/method/tageep.api.license_status
+اريد تحل المشكلة  واريد تعمل تعطيل لدالة الخاصة بالترخيص في نظام التعقيب

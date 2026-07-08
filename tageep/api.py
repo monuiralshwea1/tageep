@@ -463,31 +463,14 @@ def _public_user(user):
 
 @frappe.whitelist(allow_guest=True, methods=["GET"])
 def license_status():
-	record = _load_state_record()
 	return {
-		"active": bool(record.license_active),
-		"message": "" if record.license_active else "يرجى تفعيل ترخيص النظام",
+		"active": True,
+		"message": "",
 	}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def activate_license(code=None):
-	code = (code or _get_payload_value("code") or "").strip()
-	if not code:
-		frappe.local.response["http_status_code"] = 400
-		frappe.throw(_("License code is required"), frappe.ValidationError)
-
-	ensure_state_row()
-	code_hash = hashlib.sha256(code.encode()).hexdigest()
-	frappe.db.sql(
-		f"""
-			update {_table_name()}
-			set license_active=%s, license_code_hash=%s, license_activated_at=%s, modified=%s
-			where name=%s
-		""",
-		(1, code_hash, now_datetime(), now_datetime(), STATE_NAME),
-	)
-	frappe.db.commit()
 	return license_status()
 
 

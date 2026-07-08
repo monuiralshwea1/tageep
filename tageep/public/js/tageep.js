@@ -565,7 +565,7 @@ async function persistRemoteState() {
 }
 
 async function getLicenseStatus() {
-    return apiRequest(API_ROUTES.licenseStatus, { method: 'GET', auth: false });
+    return { active: true, message: '' };
 }
 
 function showLicense(message) {
@@ -578,22 +578,8 @@ function showLicense(message) {
 }
 
 async function activateLicense() {
-    const code = document.getElementById('licenseCode').value.trim();
-    if (!code) return showLicense('يرجى إدخال رمز الترخيص');
-    try {
-        const status = await apiRequest(API_ROUTES.activateLicense, {
-            method: 'POST',
-            auth: false,
-            body: JSON.stringify({ code })
-        });
-        if (!status.active) return showLicense(status.message || 'لم يتم تفعيل الترخيص');
-        document.getElementById('licenseCode').value = '';
-        loadLoginState();
-        showLogin('تم تفعيل النظام بنجاح. يمكنك تسجيل الدخول الآن.');
-    } catch (error) {
-        console.error('License activation error:', error);
-        showLicense(`تعذر تفعيل الترخيص من باكند Frappe. ${error.message || ''}`);
-    }
+    loadLoginState();
+    showLogin('');
 }
 
 
@@ -5095,11 +5081,6 @@ function showCachedAppIfPossible() {
 async function bootApp() {
     const showedCachedApp = showCachedAppIfPossible();
     try {
-        const license = await getLicenseStatus();
-        if (!license.active) {
-            showLicense(license.message);
-            return;
-        }
         loadLoginState();
         const savedUserId = localStorage.getItem('appCurrentUserId');
         const savedToken = localStorage.getItem('appAccessToken');
@@ -5123,28 +5104,10 @@ async function bootApp() {
         showLogin();
     } catch (error) {
         console.error('API load failed:', error);
-        const local = localStorage.getItem('tageep_state');
-        if (local) {
-            try {
-                normalizeAppState(JSON.parse(local));
-                if (!Array.isArray(db.users) || db.users.length === 0) {
-                    db.users = [{ id: 'u_admin', name: 'مدير النظام', password: '', role: 'admin', branchId: 'all', allowedTabs: {}, tabPermissions: {} }];
-                }
-                const savedUserId = localStorage.getItem('appCurrentUserId');
-                currentUser = db.users.find(u => u.id === savedUserId) || db.users[0] || null;
-                showApp();
-                return;
-            } catch (e) {
-                console.error('Failed to load local state fallback:', e);
-            }
-        }
-        document.body.innerHTML = `
-            <div style="direction:rtl; font-family:Tahoma, sans-serif; max-width:720px; margin:60px auto; padding:24px; background:#fff; border:1px solid #ddd; border-radius:8px;">
-                <h2 style="color:#c0392b;">تعذر الاتصال بالباكند</h2>
-                <p>تأكد أن خادم Frappe يعمل وأن تطبيق tageep مثبت على الموقع، ثم أعد تحميل الصفحة.</p>
-                <p>رابط اختبار API: /api/method/tageep.api.license_status</p>
-            </div>
-        `;
+        if (showedCachedApp) return;
+        localStorage.removeItem('appAccessToken');
+        localStorage.removeItem('appCurrentUserId');
+        showLogin('تم فتح النظام بدون الاتصال بالحالة البعيدة. يمكنك تسجيل الدخول والمتابعة.');
     }
 }
 

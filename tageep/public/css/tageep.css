@@ -255,8 +255,22 @@ button:hover {
     table,
     table th,
     table td {
-        font-weight: 700 !important;
+        font-weight: 800 !important;
     }
+}
+
+/* منع التفاف النص في عمودي الاسم والفرع */
+.employee-name,
+.branch-name {
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+}
+.employee-name {
+    min-width: 120px;
+}
+.branch-name {
+    min-width: 100px;
 }
 
 /* Tables */
@@ -264,8 +278,8 @@ table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 15px;
-    font-size: 14px;
-    font-weight: 700;  
+    font-size: 12px;
+    font-weight: 800;  
 }
 
 th,
@@ -418,6 +432,16 @@ thead tr.print-header-row {
         page-break-inside: avoid;
         break-inside: avoid;
     }
+
+    /* منع التفاف النص في عمودي الاسم والفرع عند الطباعة */
+    .employee-name,
+    .branch-name {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+        overflow-wrap: normal !important;
+    }
+    .employee-name { min-width: 120px; }
+    .branch-name { min-width: 100px; }
 }
 
 /* Print helper: hide everything except the print area when printing */
@@ -428,10 +452,10 @@ thead tr.print-header-row {
     #tageepPrintArea table { width: 100%; border-collapse: collapse; }
     /* === تعديل: جعل الشعار داخل thead بعرض كامل عند الطباعة === */
     #tageepPrintArea .print-header-row td div:first-child {
-        width: 100%;
+        width: 90%;
     }
     #tageepPrintArea .print-header-row td img {
-        width: 100% !important;
+        width: 90% !important;
         max-height: 150px;
         object-fit: contain;
     }
@@ -439,7 +463,7 @@ thead tr.print-header-row {
 
 #printHeader {
     display: none;
-    max-width: 100%;
+    max-width: 90%;
 
 }
 
@@ -573,6 +597,60 @@ thead tr.print-header-row {
 .searchable-select-item.selected {
     background: #dcedc8 !important;
     font-weight: bold;
+}
+
+/* تذييل الطباعة - التوقيعات (يظهر في صف واحد مع فاصل | بينهم) */
+.print-footer {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    width: 100%;
+    direction: rtl;
+}
+.print-footer .signature {
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 8px 10px;
+    white-space: nowrap;
+    position: relative;
+}
+.print-footer .signature:not(:last-child)::after {
+    content: "|";
+    margin-right: 15px;
+    color: #333;
+    font-weight: normal;
+}
+
+/* تذييل متكرر في الطباعة داخل tfoot */
+.print-footer-row {
+    display: none;
+}
+@media print {
+    .print-footer-row {
+        display: table-footer-group !important;
+    }
+    .print-footer-row td {
+        border: none !important;
+        padding: 15px 5px 5px 5px !important;
+        font-weight: 800;
+    }
+    .print-footer {
+        display: flex !important;
+        justify-content: space-around !important;
+        width: 100% !important;
+    }
+    .print-footer .signature {
+        font-size: 10pt !important;
+        border-top: 1px solid #000 !important;
+        padding-top: 6px !important;
+    }
+    .print-footer .signature:not(:last-child)::after {
+        content: "|" !important;
+        margin-right: 15px !important;
+        color: #333 !important;
+        font-weight: normal !important;
+    }
 }
 
 /* تحسين الطباعة - خطوط واضحة */

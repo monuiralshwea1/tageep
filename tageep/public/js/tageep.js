@@ -885,7 +885,7 @@ window.updatePrintPreview = function () {
             <style>
                 @page { 
                     size: ${orientation === 'landscape' ? selectedSize.height + ' ' + selectedSize.width : selectedSize.width + ' ' + selectedSize.height}; 
-                    margin: 8mm; 
+                    margin: 2mm; 
                 }
                 body { 
                     font-family: 'Segoe UI', Tahoma, Arial, sans-serif; 
@@ -903,7 +903,17 @@ window.updatePrintPreview = function () {
                     text-align: center; 
                     border: 1px solid #000;
                     word-break: keep-all;
+                    font-weight: 800;
+
                 }
+                .employee-name,
+                .branch-name {
+                    white-space: nowrap !important;
+                    word-break: keep-all !important;
+                    overflow-wrap: normal !important;
+                }
+                .employee-name { min-width: 120px; }
+                .branch-name { min-width: 100px; }
                     
                 th { 
                     background-color: #dcedc8; 
@@ -930,16 +940,44 @@ window.updatePrintPreview = function () {
             </style>
         `;
 
-        const previewContent = `<!DOCTYPE html>
+        // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>معاينة الطباعة - تقرير التعقيب</title>
+    <title>طباعة - تقرير التعقيب</title>
     ${printStyles}
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -954,7 +992,7 @@ window.updatePrintPreview = function () {
 
         const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
         iframeDoc.open();
-        iframeDoc.write(previewContent);
+        iframeDoc.write(printContent);
         iframeDoc.close();
 
         setTimeout(() => {
@@ -1034,7 +1072,7 @@ window.printVisibleTable = function () {
         const paperSize = localStorage.getItem('tageep_paper_size') || 'A4';
 
         const logoHtml = logoUrl
-            ? `<img src="${logoUrl}" style="width:100%;height:auto;object-fit:fill;display:block;margin:0;padding:0;" alt="شعار الشركة">`
+            ? `<img src="${logoUrl}" style="width:90%;height:auto;object-fit:fill;display:block;margin:0;padding:0;" alt="شعار الشركة">`
             : '';
         const headerRowHtml = `<tr style="display:table-row;">
             <td colspan="${colCount}" style="text-align:center;border:0!important;padding:0!important;">
@@ -1063,11 +1101,19 @@ window.printVisibleTable = function () {
             <style>
                 @page { 
                     size: ${orientation === 'landscape' ? selectedSize.height + ' ' + selectedSize.width : selectedSize.width + ' ' + selectedSize.height}; 
-                    margin: 8mm; 
+                    margin: 2mm; 
                 }
                 body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; margin: 0; padding: 0; }
                 table { width: 100%; border-collapse: collapse; font-size: ${fontSize}; }
                 th, td { padding: ${cellPadding}; text-align: center; border: 1px solid #000; word-break: keep-all; }
+                .employee-name,
+                .branch-name {
+                    white-space: nowrap !important;
+                    word-break: keep-all !important;
+                    overflow-wrap: normal !important;
+                }
+                .employee-name { min-width: 120px; }
+                .branch-name { min-width: 100px; }
                 th { background-color: #dcedc8; font-weight: bold; font-size: ${headerFontSize}; }
                 thead { display: table-header-group; }
                 thead th, thead td { position: static !important; }
@@ -1078,13 +1124,41 @@ window.printVisibleTable = function () {
                 .state-annual { background: #e67e22 !important; color: #ffffff !important; font-weight: 700 !important; }
                 .state-present { background: #e8f5e9 !important; color: #1b5e20 !important; font-weight: 700 !important; }
                 .state-holiday { background: #e3f2fd !important; color: #1565c0 !important; font-weight: 700 !important; }
-                table, table th, table td { font-weight: 700 !important; }
+                table, table th, table td { font-weight: 800 !important; }
                 @media print { .state-absent, .state-annual, .state-present, .state-holiday { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
             </style>
         `;
 
         const tableHtml = tableClone.outerHTML;
         const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
+
+        // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
 
         const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -1095,7 +1169,7 @@ window.printVisibleTable = function () {
     ${printStyles}
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -1901,8 +1975,8 @@ function renderMainTable() {
             <tr>
                 <td style="font-weight:bold;">${rowNum}</td>
                 <td>${emp.employeeNumber || ''}</td>
-                <td>${emp.name}</td>
-                <td>${branchName}</td>
+                <td class="employee-name">${emp.name}</td>
+                <td class="branch-name">${branchName}</td>
                 <td dir="ltr" style="color:${emp.leaveBalance < 5 ? 'red' : 'green'}">${emp.leaveBalance}</td>
                 <!-- تعديل جديد: تم نقل الأجر اليومي إلى هنا بعد رصيد الإجازات -->
                 <td>${dayWage.toLocaleString()}</td>
@@ -2080,7 +2154,45 @@ function printReportTable() {
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
 
-    const printContent = `<!DOCTYPE html>
+    // const printFooter = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -2099,7 +2211,7 @@ function printReportTable() {
     </style>
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -2262,7 +2374,45 @@ function updatePrintPreviewWithTitle(customTitle) {
             </style>
         `;
 
-        const previewContent = `<!DOCTYPE html>
+        // const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        //     <span class="signature">رئيس قسم الموارد البشرية</span>
+        //     <span class="signature">رئيس قسم الحسابات</span>
+        //     <span class="signature">المراجعة</span>
+        //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        // </div></td></tr></tfoot>`;
+
+        // const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+
+        // const previewContent = `<!DOCTYPE html>
+                // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -2271,7 +2421,7 @@ function updatePrintPreviewWithTitle(customTitle) {
     ${printStyles}
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -2286,7 +2436,7 @@ function updatePrintPreviewWithTitle(customTitle) {
 
         const iframeDoc = previewFrame.contentDocument || previewFrame.contentWindow.document;
         iframeDoc.open();
-        iframeDoc.write(previewContent);
+        iframeDoc.write(printContent);
         iframeDoc.close();
 
         setTimeout(() => {
@@ -2491,8 +2641,8 @@ function renderReportTable() {
             <tr>
                 <td style="font-weight:bold;">${rowNum}</td>
                 <td>${emp.employeeNumber || ''}</td>
-                <td>${emp.name}</td>
-                <td>${branchName}</td>
+                <td class="employee-name">${emp.name}</td>
+                <td class="branch-name">${branchName}</td>
                 <td>${leaveBalance}</td>
                 <td>${shiftName || '-'}</td>
                 <td>${periodText}</td>
@@ -2791,7 +2941,45 @@ function printSummaryTable() {
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
 
-    const printContent = `<!DOCTYPE html>
+    // const printFooter = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -2810,7 +2998,7 @@ function printSummaryTable() {
     </style>
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -3004,7 +3192,45 @@ function printEmployeesTable() {
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
 
-    const printContent = `<!DOCTYPE html>
+    // const printFooter = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -3023,7 +3249,7 @@ function printEmployeesTable() {
     </style>
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -3497,8 +3723,8 @@ function renderDailyFollowups() {
                 <td style="font-weight:bold;">${rowNum}</td>
                 <td>${getDayName(item.date)} - ${item.date}</td>
                 <td>${employee.employeeNumber || ''}</td>
-                <td>${employee.name}</td>
-                <td>${branchName}</td>
+                <td class="employee-name">${employee.name}</td>
+                <td class="branch-name">${branchName}</td>
                 <td>${statusLabel}</td>
                 <td>${periodLabel}</td>
                 <td>${item.notes || '-'}</td>
@@ -3632,8 +3858,8 @@ function renderDailyExtras() {
             <tr>
                 <td>${getDayName(item.date)} - ${item.date}</td>
                 <td>${employee.employeeNumber || ''}</td>
-                <td>${employee.name}</td>
-                <td>${branchName}</td>
+                <td class="employee-name">${employee.name}</td>
+                <td class="branch-name">${branchName}</td>
                 <td>${(parseFloat(item.amount) || 0).toLocaleString()}</td>
                 <td>${item.notes || '-'}</td>
                 <td class="no-print">
@@ -3727,8 +3953,8 @@ function renderDailyAdvances() {
             <tr>
                 <td>${getDayName(item.date)} - ${item.date}</td>
                 <td>${employee.employeeNumber || ''}</td>
-                <td>${employee.name}</td>
-                <td>${branchName}</td>
+                <td class="employee-name">${employee.name}</td>
+                <td class="branch-name">${branchName}</td>
                 <td>${(parseFloat(item.amount) || 0).toLocaleString()}</td>
                 <td>${item.notes || '-'}</td>
                 <td class="no-print">
@@ -4231,7 +4457,43 @@ function previewSentReport(reportId) {
     const cellPadding = isPortrait ? '2px 3px' : '4px 6px';
     const headerFontSize = isPortrait ? '9px' : '11px';
 
-    const printContent = `<!DOCTYPE html>
+    const footerRowCount = tableRows.split('<tr>').length - 1;
+    // const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="7"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -4275,6 +4537,7 @@ function previewSentReport(reportId) {
         <tbody>
             ${tableRows}
         </tbody>
+        ${footerNewHtml}
     </table>
 </body>
 </html>`;
@@ -4863,7 +5126,45 @@ function printDailyTable() {
     const tableHtml = tableClone.outerHTML;
     const finalHtml = tableHtml.replace(/<thead>[\s\S]*?<\/thead>/, fullTheadHtml);
 
-    const printContent = `<!DOCTYPE html>
+    // const printFooter = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -4882,7 +5183,7 @@ function printDailyTable() {
     </style>
 </head>
 <body>
-    ${finalHtml}
+    ${finalHtmlWithFooter}
 </body>
 </html>`;
 
@@ -5064,7 +5365,42 @@ function previewArchivedReport(reportId) {
     const cellPadding = isPortrait ? '2px 3px' : '4px 6px';
     const headerFontSize = isPortrait ? '9px' : '11px';
 
-    const printContent = `<!DOCTYPE html>
+    // const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="8"><div class="print-footer">
+    //     <span class="signature">رئيس قسم الموارد البشرية</span>
+    //     <span class="signature">رئيس قسم الحسابات</span>
+    //     <span class="signature">المراجعة</span>
+    //     <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    // </div></td></tr></tfoot>`;
+
+    // const printContent = `<!DOCTYPE html>
+            // ==================== تعديل الفوتر ====================
+        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+        /*
+        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+            <span class="signature">رئيس قسم الموارد البشرية</span>
+            <span class="signature">رئيس قسم الحسابات</span>
+            <span class="signature">المراجعة</span>
+            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+        </div></td></tr></tfoot>`;
+        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+        */
+        
+        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+        // الفوتر في صف واحد بأربعة أعمدة.
+        const footerNewHtml = `
+        <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
+            <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
+              <tr style="height: 80px; vertical-align: top;">
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الموارد البشرية</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">رئيس قسم الحسابات</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">المراجعة</td>
+                    <td style="padding:${cellPadding};text-align:right;border:1px solid #000;font-weight:bold;width:25%;">نائب المدير العام للشؤون المالية والإدارية</td>
+                </tr>
+            </table>
+        </div>`;
+
+        const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -5109,6 +5445,7 @@ function previewArchivedReport(reportId) {
         <tbody>
             ${tableRows}
         </tbody>
+        ${footerNewHtml}
     </table>
 </body>
 </html>`;

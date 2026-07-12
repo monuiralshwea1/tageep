@@ -1909,3 +1909,988 @@
 </body>
 
 </html>
+/////////////////////////////////
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tageep - نظام التعقيب وإدارة الفروع</title>
+    <link rel="stylesheet" href="/assets/tageep/css/tageep.css?v=20260706-1">
+    <script>window.frappe = window.frappe || {};</script>
+</head>
+
+<body>
+    <div id="bootScreen">
+        <div class="boot-card">
+            <div class="boot-title">نظام التعقيب</div>
+            <div class="boot-text">جاري تحميل البيانات...</div>
+        </div>
+    </div>
+
+    <div id="licenseScreen">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-marquee">اذكر الله وصل على النبي</div>
+                <h2>تفعيل ترخيص النظام</h2>
+            </div>
+            <div class="login-body">
+                <p class="license-note">أدخل رمز الترخيص المرسل من مالك النظام للمتابعة.</p>
+                <div class="form-control">
+                    <label>رمز الترخيص</label>
+                    <input type="text" id="licenseCode" placeholder="أدخل رمز الترخيص">
+                </div>
+                <div class="login-actions">
+                    <button onclick="activateLicense()">تفعيل النظام</button>
+                </div>
+                <p id="licenseMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="loginScreen">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-marquee">اذكر الله وصلى على النبي</div>
+                <h2>مرحبا بكم في نظام تعقيب الموظفين في الفروع</h2>
+            </div>
+            <div class="login-body">
+                <div class="form-control"><label>اسم المستخدم</label><input type="text" id="loginUsername"
+                        placeholder="ادخل اسم المستخدم"></div>
+                <div class="form-control"><label>كلمة المرور</label><input type="password" id="loginPassword"
+                        placeholder="ادخل كلمة المرور"></div>
+                <div class="form-control checkbox-control"><label><input type="checkbox" id="rememberPassword"> تذكّر
+                        كلمة المرور</label></div>
+                <div class="login-actions">
+                    <button onclick="login()">تسجيل الدخول</button>
+                    <button class="btn-warning" onclick="forgotPassword()">نسيت كلمة المرور</button>
+                </div>
+                <p id="loginMessage"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="appRoot">
+        <div class="top-nav">
+            <button class="nav-btn" data-target="tab-main" onclick="switchTab('tab-main')">الرئيسية (التعقيب)</button>
+            <button class="nav-btn" data-target="tab-daily" onclick="switchTab('tab-daily')">التعقيب اليومي</button>
+            <button class="nav-btn" data-target="tab-archive" onclick="switchTab('tab-archive')">أرشفة التعقيب
+                المرحل</button>
+            <button class="nav-btn" data-target="tab-sent" onclick="switchTab('tab-sent')">التعقيب المرسل</button>
+            <button class="nav-btn" data-target="tab-employees" onclick="switchTab('tab-employees')">الموظفين</button>
+            <button class="nav-btn" data-target="tab-branches" onclick="switchTab('tab-branches')">الفروع</button>
+            <button class="nav-btn" data-target="tab-users" onclick="switchTab('tab-users')">المستخدمين</button>
+            <button class="nav-btn" data-target="tab-settings" onclick="switchTab('tab-settings')">الإعدادات</button>
+            <div class="company-title" id="displayCompanyName">النظام</div>
+            <span id="currentUserDisplay"
+                style="margin-right:12px; color: #fff; display:none; font-weight:bold;"></span>
+            <button id="logoutBtn" onclick="logout()"
+                style="margin-right:8px; padding:6px 10px; display:none; background:#c0392b; color:#fff; border:none; border-radius:4px; cursor:pointer;">تسجيل
+                خروج</button>
+            <select id="currentUserSelect" onchange="changeUser()" style="margin-right: 15px; padding: 5px;"></select>
+        </div>
+
+        <div class="content">
+            <!-- === تعديل: تم نقل الشعار والعنوان داخل thead الجدول نفسه عند الطباعة (راجع printVisibleTable في tageep.js) === -->
+            <!-- الكود الأصلي: كان printHeader عنصراً منفصلاً خارج الجدول، مما يمنع تكراره في الصفحات اللاحقة أثناء الطباعة -->
+            <!-- <div id="printHeader"> -->
+            <!--     <img id="printLogo" src="" alt="شعار الشركة"> -->
+            <!--     <h2 id="printTitle">كشف تعقيب الموظفين</h2> -->
+            <!--     <p id="printDateRange"></p> -->
+            <!-- </div> -->
+
+            <!-- حافظنا على العناصر المخفية للإسناد (backward compatibility): -->
+            <div id="printHeader" style="display:none;">
+                <img id="printLogo" src="" alt="شعار الشركة">
+                <h2 id="printTitle">كشف تعقيب الموظفين</h2>
+                <p id="printDateRange"></p>
+            </div>
+            <div id="tab-main" class="tab-content active">
+                <div class="sub-tabs">
+                    <button class="sub-tab-btn active" data-main-panel="attendance-panel"
+                        onclick="switchMainPanel('attendance-panel')">التعقيب</button>
+                    <button class="sub-tab-btn" data-main-panel="report-panel"
+                        onclick="switchMainPanel('report-panel')">التقارير</button>
+                    <button class="sub-tab-btn" data-main-panel="summary-panel"
+                        onclick="switchMainPanel('summary-panel')">الإيضاحي</button>
+                </div>
+
+                <div id="attendance-panel" class="main-panel active">
+                    <div class="filters">
+                        <div class="form-control">
+                            <label>بحث بالاسم:</label>
+                            <input type="text" id="filterName" onkeyup="renderMainTable()" placeholder="اسم الموظف...">
+                        </div>
+                        <div class="form-control">
+                            <label>الفرع:</label>
+                            <select id="filterBranch" onchange="renderMainTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>من تاريخ:</label>
+                            <input type="date" id="filterFrom" onchange="renderMainTable()">
+                        </div>
+                        <div class="form-control">
+                            <label>إلى تاريخ:</label>
+                            <input type="date" id="filterTo" onchange="renderMainTable()">
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="printVisibleTable()" style="background-color: var(--primary);">🖨️ طباعة
+                                الجدول</button>
+                            <button onclick="exportMainTableToExcel()" style="background-color:#1f8f4d; margin-left:8px;">📊
+                                تصدير Excel</button>
+                            <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️
+                                معاينة الطباعة</button>
+                            <button onclick="resetMainFilters()"
+                                style="background-color:#607d8b; margin-left:8px;">إعادة ضبط الفلاتر</button>
+                        </div>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr id="mainTableHeaderRow">
+                                    <th style="width:40px;">م</th>
+                                    <th>رقم الموظف</th>
+                                    <th class="employee-name">الاسم</th>
+                                    <th class="branch-name">الفرع</th>
+                                    <th>رصيد الإجازات</th>
+                                    <!-- تعديل جديد: تم نقل عمود "الأجر اليومي" ليظهر بعد رصيد الإجازات مباشرة -->
+                                    <th>الأجر اليومي</th>
+                                    <th>الأيام المتوقعة</th>
+                                    <!-- تعديل جديد: عمود محسوب = الأيام المتوقعة × الأجر اليومي -->
+                                    <th>اجمالي المبلغ المتوقع</th>
+                                    <!-- الأعمدة الديناميكية (dyn-date) يتم إنشاؤها تلقائياً في renderMainTable() -->
+                                    <th>أيام الغياب</th>
+                                    <th>إجازات مستنفذه</th>
+                                    <th>الإجازة الأخرى</th>
+                                    <th>الأيام الفعلية</th>
+                                    <!-- تعديل جديد: عمود محسوب = الأيام الفعلية × الأجر اليومي -->
+                                    <th>اجمالي المبلغ الفعلي</th>
+                                    <!-- تعديل جديد: السلف تخصم من إجمالي المبلغ الفعلي عند حساب الصافي -->
+                                    <th>السلف</th>
+                                    <!-- الكود الأصلي معطل: كان عمود الأجر اليومي هنا بعد الأيام الفعلية -->
+                                    <!-- <th>الأجر اليومي</th> -->
+                                    <th>الإضافي</th>
+                                    <th>الصافي المستحق</th>
+                                    <th class="no-print">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mainTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="report-panel" class="main-panel">
+                    <div class="filters">
+                        <div class="form-control">
+                            <label>الفرع:</label>
+                            <select id="reportBranch" onchange="renderReportTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>الدوام:</label>
+                            <!-- تم تعديل حدث onchange ليقوم بتحديث قائمة الفترات أولاً ثم يعيد عرض التقرير -->
+                            <select id="reportShift" onchange="renderReportPeriodFilter(); renderReportTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>الفترة:</label>
+                            <!-- حقل جديد لاختيار فترة مرتبطة بالدوام -->
+                            <select id="reportPeriod" onchange="renderReportTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>الشهر:</label>
+                            <select id="reportMonth" onchange="reportMonthChanged()">
+                                <option value="1">يناير</option>
+                                <option value="2">فبراير</option>
+                                <option value="3">مارس</option>
+                                <option value="4">أبريل</option>
+                                <option value="5">مايو</option>
+                                <option value="6">يونيو</option>
+                                <option value="7">يوليو</option>
+                                <option value="8">أغسطس</option>
+                                <option value="9">سبتمبر</option>
+                                <option value="10">أكتوبر</option>
+                                <option value="11">نوفمبر</option>
+                                <option value="12">ديسمبر</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>السنة:</label>
+                            <select id="reportYear" onchange="reportMonthChanged()">
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>من تاريخ:</label>
+                            <input type="date" id="reportFrom" onchange="reportDateChanged()">
+                        </div>
+                        <div class="form-control">
+                            <label>إلى تاريخ:</label>
+                            <input type="date" id="reportTo" onchange="reportDateChanged()">
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="renderReportTable()" style="background-color: var(--primary);">عرض
+                                التقرير</button>
+                            <button onclick="printReportTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
+                                طباعة التقرير</button>
+                            <button onclick="exportReportTableToExcel()" style="background-color:#1f8f4d; margin-left:8px;">📊
+                                تصدير Excel</button>
+                            <button onclick="previewReportTable()"
+                                style="background-color:#2ecc71; margin-left:8px;">👁️
+                                معاينة الطباعة</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr id="reportTableHeaderRow">
+                                    <th style="width:40px;">م</th>
+                                    <th>الرقم الوظيفي</th>
+                                    <th class="employee-name">الاسم</th>
+                                    <th class="branch-name">الفرع</th>
+                                    <th>رصيد الإجازات</th>
+                                    <th>نوع الدوام</th>
+                                    <th>الفترة</th>
+                                    <!-- أعمدة التاريخ الديناميكية يتم إنشاؤها تلقائياً في renderReportTable() -->
+                                    <th>أيام الحضور</th>
+                                    <th>أيام الغياب</th>
+                                    <th>إجازات سنوية</th>
+                                    <!-- تعديل جديد: عمود مستقل للإجازة الأخرى -->
+                                    <th>الإجازة الأخرى</th>
+                                    <th>الرصيد المتبقي</th>
+                                    <th>المناسبات</th>
+                                    <th>الإضافي</th>
+                                    <th>المستحق</th>
+                                </tr>
+                            </thead>
+                            <tbody id="reportTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- ===== لوحة الإيضاحي الجديدة (خارج report-panel) ===== -->
+                <div id="summary-panel" class="main-panel">
+                    <div class="filters">
+                        <div class="form-control">
+                            <label>من تاريخ:</label>
+                            <input type="date" id="summaryFrom" onchange="renderSummaryTable()">
+                        </div>
+                        <div class="form-control">
+                            <label>إلى تاريخ:</label>
+                            <input type="date" id="summaryTo" onchange="renderSummaryTable()">
+                        </div>
+                        <div class="form-control">
+                            <label>الفرع:</label>
+                            <select id="summaryBranch" onchange="renderSummaryTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>الموظف:</label>
+                            <select id="summaryEmp" onchange="renderSummaryTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="renderSummaryTable()" style="background-color: var(--primary);">عرض الجدول</button>
+                            <button onclick="printSummaryTable()" style="background-color:#607d8b; margin-left:8px;">🖨️ طباعة الجدول</button>
+                            <button onclick="previewSummaryTable()" style="background-color:#2ecc71; margin-left:8px;">👁️ معاينة الطباعة</button>
+                        </div>
+                    </div>
+                    <div id="summaryDateRange" style="text-align:center; font-size:14px; font-weight:bold; margin:10px 0;"></div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>البيان</th>
+                                    <th>عدد الأيام الفعلية</th>
+                                    <th>عدد الموظفين</th>
+                                    <th>إجمالي عدد الأيام</th>
+                                    <th>إجمالي المبالغ</th>
+                                    <th>فارق الأيام</th>
+                                    <th>فارق الموظفين</th>
+                                    <th>الملاحظات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="summaryTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-daily" class="tab-content">
+                <div class="sub-tabs">
+                    <button class="sub-tab-btn active" data-daily-panel="daily-followup-panel"
+                        onclick="switchDailyPanel('daily-followup-panel')">التعقيب اليومي</button>
+                    <button class="sub-tab-btn" data-daily-panel="daily-extra-panel"
+                        onclick="switchDailyPanel('daily-extra-panel')">الإضافي</button>
+                    <!-- تعديل جديد: تبويب السلف بجانب تبويب الإضافي -->
+                    <button class="sub-tab-btn" data-daily-panel="daily-advance-panel"
+                        onclick="switchDailyPanel('daily-advance-panel')">السلف</button>
+                </div>
+                <div id="daily-followup-panel" class="daily-panel active">
+                    <div class="form-group">
+                        <input type="hidden" id="dailyEditId">
+                        <div class="form-control"><label>الفرع</label><select id="dailyBranch"></select></div>
+                        <div class="form-control"><label>الموظف</label><select id="dailyEmp"></select></div>
+                        <div class="form-control"><label>اليوم / التاريخ</label><input type="date" id="dailyDate"></div>
+                        <div class="form-control"><label>نوع الحالة</label><select id="dailyStatus">
+                                <option value="present">حاضر</option>
+                                <option value="absent">غائب</option>
+                                <option value="annual">إجازة سنوية</option>
+                                <!-- تعديل جديد: إجازة أخرى تعمل مثل الإجازة السنوية في خصم الأيام الفعلية -->
+                                <option value="other_leave">إجازة أخرى</option>
+                                <option value="holiday_present">مناسبة</option>
+                            </select></div>
+                        <div class="form-control" id="dailyPeriodContainer"><label>الفترة</label>
+                            <!-- legacy input preserved for compatibility; JS will hide it and insert select#dailyPeriod -->
+                            <input type="number" id="dailyValue" value="1" min="0.5" step="0.5">
+                        </div>
+                        <div class="form-control"><label>ملاحظات</label><input type="text" id="dailyNotes"
+                                placeholder="مثال: دورة تدريبية"></div>
+                        <button id="btnSaveDaily" onclick="saveDailyEntry()" style="margin-bottom:5px;">حفظ التعقيب
+                            اليومي</button>
+                        <button onclick="resetDailyForm()" class="btn-warning" style="margin-bottom:5px;">إلغاء</button>
+                    </div>
+                    <div class="filters">
+                        <div class="form-control"><label>بحث فرع</label><select id="dailyFilterBranch"
+                                onchange="renderDailyFollowups()"></select></div>
+                        <div class="form-control"><label>بحث موظف</label><select id="dailyFilterEmp"
+                                onchange="renderDailyFollowups()">
+                                <option value="all">الكل</option>
+                            </select></div>
+                        <div class="form-control"><label>نوع الحالة</label><select id="dailyFilterStatus"
+                                onchange="renderDailyFollowups()">
+                                <option value="all">الكل</option>
+                                <option value="present">حاضر</option>
+                                <option value="absent">غائب</option>
+                                <option value="annual">إجازة سنوية</option>
+                                <!-- تعديل جديد: فلتر إجازة أخرى -->
+                                <option value="other_leave">إجازة أخرى</option>
+                                <option value="holiday_present">مناسبة</option>
+                            </select></div>
+                        <div class="form-control"><label>من</label><input type="date" id="dailyFilterFrom"
+                                onchange="renderDailyFollowups()"></div>
+                        <div class="form-control"><label>إلى</label><input type="date" id="dailyFilterTo"
+                                onchange="renderDailyFollowups()"></div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button onclick="sendDailyRecords()" class="btn-success"
+                                style="background-color:#2196F3; color:white;">📤 إرسال التعقيب</button>
+                            <button onclick="printDailyTable()" style="background-color: var(--primary);">🖨️ طباعة
+                                الجدول</button>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:40px;">م</th>
+                                    <th>اليوم / التاريخ</th>
+                                    <th>رقم الموظف</th>
+                                    <th class="employee-name">اسم الموظف</th>
+                                    <th class="branch-name">الفرع</th>
+                                    <th>نوع الحالة</th>
+                                    <th>الفترة</th>
+                                    <th>الملاحظات</th>
+                                    <th class="no-print">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dailyTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="daily-extra-panel" class="daily-panel">
+                    <div class="form-group">
+                        <input type="hidden" id="extraEditId">
+                        <div class="form-control"><label>الموظف</label><select id="extraEmp"></select></div>
+                        <div class="form-control"><label>التاريخ</label><input type="date" id="extraDate"></div>
+                        <div class="form-control"><label>المبلغ الإضافي</label><input type="number" id="extraAmount"
+                                min="0" step="0.01"></div>
+                        <div class="form-control"><label>ملاحظات</label><input type="text" id="extraNotes"
+                                placeholder="مثال: زيادة عمل"></div>
+                        <button id="btnSaveExtra" onclick="saveDailyExtra()" style="margin-bottom:5px;">إضافة
+                            الإضافي</button>
+                        <button onclick="resetDailyExtraForm()" class="btn-warning"
+                            style="margin-bottom:5px;">إلغاء</button>
+                    </div>
+                    <div class="filters">
+                        <div class="form-control"><label>بحث موظف</label><select id="extraFilterEmp"
+                                onchange="renderDailyExtras()"></select></div>
+                        <div class="form-control"><label>من</label><input type="date" id="extraFilterFrom"
+                                onchange="renderDailyExtras()"></div>
+                        <div class="form-control"><label>إلى</label><input type="date" id="extraFilterTo"
+                                onchange="renderDailyExtras()"></div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>التاريخ</th>
+                                    <th>رقم الموظف</th>
+                                    <th class="employee-name">اسم الموظف</th>
+                                    <th class="branch-name">الفرع</th>
+                                    <th>المبلغ الإضافي</th>
+                                    <th>الملاحظات</th>
+                                    <th class="no-print">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="extraTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- تعديل جديد: واجهة السلف بنفس حقول واجهة الإضافي.
+                     الكود الأصلي لم يكن يحتوي على تبويب أو نموذج للسلف. -->
+                <div id="daily-advance-panel" class="daily-panel">
+                    <div class="form-group">
+                        <input type="hidden" id="advanceEditId">
+                        <div class="form-control"><label>الموظف</label><select id="advanceEmp"></select></div>
+                        <div class="form-control"><label>التاريخ</label><input type="date" id="advanceDate"></div>
+                        <div class="form-control"><label>مبلغ السلفة</label><input type="number" id="advanceAmount"
+                                min="0" step="0.01"></div>
+                        <div class="form-control"><label>ملاحظات</label><input type="text" id="advanceNotes"
+                                placeholder="مثال: سلفة نقدية"></div>
+                        <button id="btnSaveAdvance" onclick="saveDailyAdvance()" style="margin-bottom:5px;">إضافة
+                            السلفة</button>
+                        <button onclick="resetDailyAdvanceForm()" class="btn-warning"
+                            style="margin-bottom:5px;">إلغاء</button>
+                    </div>
+                    <div class="filters">
+                        <div class="form-control"><label>بحث موظف</label><select id="advanceFilterEmp"
+                                onchange="renderDailyAdvances()"></select></div>
+                        <div class="form-control"><label>من</label><input type="date" id="advanceFilterFrom"
+                                onchange="renderDailyAdvances()"></div>
+                        <div class="form-control"><label>إلى</label><input type="date" id="advanceFilterTo"
+                                onchange="renderDailyAdvances()"></div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>التاريخ</th>
+                                    <th>رقم الموظف</th>
+                                    <th class="employee-name">اسم الموظف</th>
+                                    <th class="branch-name">الفرع</th>
+                                    <th>مبلغ السلفة</th>
+                                    <th>الملاحظات</th>
+                                    <th class="no-print">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="advanceTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-archive" class="tab-content">
+                <div class="filters">
+                    <div class="form-control"><label>بحث فرع</label><select id="archiveFilterBranch"
+                            onchange="renderArchiveReports()"></select></div>
+                    <div class="form-control"><label>بحث من</label><input type="date" id="archiveFilterFrom"
+                            onchange="renderArchiveReports()"></div>
+                    <div class="form-control"><label>بحث إلى</label><input type="date" id="archiveFilterTo"
+                            onchange="renderArchiveReports()"></div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الفرع</th>
+                            <th>تاريخ الترحيل</th>
+                            <th>عدد السجلات</th>
+                            <th>تاريخ الإنشاء</th>
+                            <th class="no-print">إجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody id="archiveTableBody"></tbody>
+                </table>
+            </div>
+
+            <div id="tab-sent" class="tab-content">
+                <div class="filters">
+                    <div class="form-control"><label>بحث فرع</label><select id="sentFilterBranch"
+                            onchange="renderSentReports()"></select></div>
+                    <div class="form-control"><label>بحث من</label><input type="date" id="sentFilterFrom"
+                            onchange="renderSentReports()"></div>
+                    <div class="form-control"><label>بحث إلى</label><input type="date" id="sentFilterTo"
+                            onchange="renderSentReports()"></div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الفرع</th>
+                            <th>تاريخ الإرسال</th>
+                            <th>عدد السجلات</th>
+                            <th>تاريخ الإنشاء</th>
+                            <th>الحالة</th>
+                            <th class="no-print">إجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sentTableBody"></tbody>
+                </table>
+            </div>
+
+            <div id="tab-employees" class="tab-content">
+                <div class="form-group">
+                    <input type="hidden" id="empEditId">
+                    <div class="form-control"><label>رقم الموظف</label><input type="number" id="empNumber" min="1"
+                            step="1" placeholder="يولد تلقائياً إذا تركته فارغاً"></div>
+                    <div class="form-control"><label>اسم الموظف</label><input type="text" id="empName"></div>
+                    <div class="form-control"><label>تاريخ التعيين/الإضافة</label><input type="date" id="empDate"></div>
+                    <div style="display:flex; gap:15px; flex-wrap:wrap; width:100%;">
+                        <div class="form-control" style="flex:1; min-width:180px;"><label>الفرع</label><select
+                                id="empBranch"></select></div>
+                        <div class="form-control" style="flex:1; min-width:180px;"><label>رصيد الإجازات</label><input
+                                type="number" id="empLeave" value="30"></div>
+                        <div class="form-control" style="flex:1; min-width:180px;"><label>الأجر اليومي</label><input
+                                type="number" id="empWage"></div>
+                        <!-- MODIFIED: إضافة حقل اختيار الدوام للموظف (لم يكن موجوداً في الكود الأصلي) -->
+                        <div class="form-control" style="flex:1; min-width:180px;"><label>الدوام</label><select
+                                id="empShift"></select></div>
+                    </div>
+                    <button id="btnSaveEmp" onclick="saveEmployee()" style="margin-bottom: 5px;">حفظ الموظف</button>
+                    <button onclick="resetEmpForm()" class="btn-warning" style="margin-bottom: 5px;">إلغاء</button>
+                </div>
+                <div class="filters">
+                    <div class="form-control"><label>الفرع</label><select id="empFilterBranch"
+                            onchange="renderEmployees()">
+                            <option value="all">الكل</option>
+                        </select></div>
+                    <div class="form-control"><label>بحث بالاسم</label><input type="text" id="empFilterName"
+                            onkeyup="renderEmployees()" placeholder="ابحث عن موظف..."></div>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="printEmployeesTable()" style="background-color: var(--primary);">🖨️ طباعة
+                            الجدول</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>رقم الموظف</th>
+                                <th>الاسم</th>
+                                <th>التاريخ</th>
+                                <th>الفرع</th>
+                                <th>الأجر</th>
+                                <th>الرصيد</th>
+                                <th>الدوام</th>
+                                <th>إجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="empTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-branches" class="tab-content">
+                <div class="form-group">
+                    <input type="hidden" id="branchEditId">
+                    <div class="form-control"><label>رقم الفرع</label><input type="number" id="branchNumber" min="1"
+                            step="1" placeholder="يولد تلقائياً إذا تركته فارغاً"></div>
+                    <div class="form-control"><label>اسم الفرع</label><input type="text" id="branchName"></div>
+                    <div class="form-control" style="flex:2;"><label>عنوان الفرع</label><input type="text"
+                            id="branchAddress" placeholder="عنوان الفرع"></div>
+                    <button id="btnSaveBranch" onclick="saveBranch()">حفظ الفرع</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>رقم الفرع</th>
+                                <th>اسم الفرع</th>
+                                <th>عنوان الفرع</th>
+                                <th>إجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody id="branchesTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="tab-users" class="tab-content">
+                <div class="form-group">
+                    <input type="hidden" id="userEditId">
+                    <div class="form-control"><label>اسم المستخدم</label><input type="text" id="userName"></div>
+                    <div class="form-control"><label>كلمة المرور</label><input type="password" id="userPassword"
+                            placeholder="اتركها فارغة للحفاظ على كلمة المرور الحالية"></div>
+                    <div class="form-control">
+                        <label>نوع الصلاحية</label>
+                        <select id="userRole">
+                            <option value="admin">مدير نظام</option>
+                            <option value="branch_manager">مستخدم فرع</option>
+                        </select>
+                    </div>
+                    <div class="form-control"><label>صلاحية الفرع</label><select id="userBranch">
+                            <option value="all">الكل</option>
+                        </select></div>
+                    <div class="form-control" style="flex-basis:100%;">
+                        <label>الواجهات الظاهرة</label>
+                        <div style="display:grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap:8px;">
+                            <label><input type="checkbox" id="tabMainView"> التعقيب الرئيسي</label>
+                            <label><input type="checkbox" id="tabDailyView"> التعقيب اليومي</label>
+                            <label><input type="checkbox" id="tabArchiveView"> أرشفة التعقيب</label>
+                            <label><input type="checkbox" id="tabEmployeesView"> الموظفين</label>
+                            <label><input type="checkbox" id="tabBranchesView"> الفروع</label>
+                            <label><input type="checkbox" id="tabUsersView"> المستخدمين</label>
+                            <label><input type="checkbox" id="tabSettingsView"> الإعدادات</label>
+                        </div>
+                    </div>
+                    <div class="form-control" style="flex-basis:100%;">
+                        <label>صلاحيات كل واجهة</label>
+                        <div style="display:grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap:8px;">
+                            <div><label>التعقيب الرئيسي</label><select id="permMain">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>التعقيب اليومي</label><select id="permDaily">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>أرشفة التعقيب</label><select id="permArchive">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>الموظفين</label><select id="permEmployees">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>الفروع</label><select id="permBranches">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>المستخدمين</label><select id="permUsers">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                            <div><label>الإعدادات</label><select id="permSettings">
+                                    <option value="all">الكل</option>
+                                    <option value="view">عرض فقط</option>
+                                    <option value="add">إضافة</option>
+                                    <option value="edit">تعديل</option>
+                                    <option value="delete">حذف</option>
+                                    <option value="none">بدون</option>
+                                </select></div>
+                        </div>
+                    </div>
+                    <button id="btnSaveUser" onclick="saveUser()">حفظ المستخدم</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>الاسم</th>
+                            <th>النوع</th>
+                            <th>الفرع</th>
+                            <th>الواجهات</th>
+                            <th>الصلاحيات</th>
+                            <th>إجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersTableBody"></tbody>
+                </table>
+            </div>
+
+            <div id="tab-settings" class="tab-content">
+                <div style="display:flex; gap:15px; align-items:flex-start;">
+                    <div style="min-width:220px;">
+                        <button class="nav-btn"
+                            style="background:none; color:var(--primary); margin:0; padding:6px 10px; border:1px solid var(--border);"
+                            id="settings-tab-general-btn" onclick="showSettingsSubtab('general')">عام</button>
+                        <button class="nav-btn"
+                            style="background:none; color:var(--primary); margin:0; padding:6px 10px; border:1px solid var(--border);"
+                            id="settings-tab-holidays-btn" onclick="showSettingsSubtab('holidays')">المناسبات
+                            والأعياد</button>
+                        <button class="nav-btn"
+                            style="background:none; color:var(--primary); margin:0; padding:6px 10px; border:1px solid var(--border);"
+                            id="settings-tab-shifts-btn" onclick="showSettingsSubtab('shifts')">الدوام والفترات</button>
+                    </div>
+                    <div style="flex:1;">
+                        <div id="settings-subtab-general" style="display:block;">
+                            <div class="form-group"
+                                style="flex-direction: column; align-items: flex-start; max-width: 400px;">
+                                <div class="form-control" style="width: 100%;"><label>اسم الشركة</label><input
+                                        type="text" id="settingsCompanyName"></div>
+                                <div class="form-control" style="width: 100%;"><label>شعار رأس الصفحة (اختيار
+                                        ملف)</label><input type="text" id="settingsLogo"></div>
+                                <div class="form-control" style="width: 100%;"><label>حجم ورق الطباعة</label>
+                                    <select id="settingsPaperSize">
+                                        <option value="A4">A4</option>
+                                        <option value="A5">A5</option>
+                                        <option value="Letter">Letter</option>
+                                        <option value="Legal">Legal</option>
+                                    </select>
+                                </div>
+                                <div class="form-control" style="width: 100%;"><label>أيام العطلة الأسبوعية (اختر أكثر
+                                        من
+                                        يوم)</label>
+                                    <div id="settingsWeeklyOff"
+                                        style="display:grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 8px; margin-top: 5px;">
+                                        <label><input type="checkbox" value="5"> الجمعة</label>
+                                        <label><input type="checkbox" value="6"> السبت</label>
+                                        <label><input type="checkbox" value="0"> الأحد</label>
+                                        <label><input type="checkbox" value="1"> الاثنين</label>
+                                        <label><input type="checkbox" value="2"> الثلاثاء</label>
+                                        <label><input type="checkbox" value="3"> الأربعاء</label>
+                                        <label><input type="checkbox" value="4"> الخميس</label>
+                                    </div>
+                                    <small style="color:#666; margin-top:5px; display:block;">افتراضياً يتم اختيار
+                                        الجمعة،
+                                        ويمكن اختيار يومين أو أكثر.</small>
+                                </div>
+                                <button id="btnSaveSettings" onclick="saveSettings()"
+                                    style="width: 100%; margin-top: 10px;">حفظ
+                                    الإعدادات</button>
+                                <div id="weeklyOffSaveMessage"
+                                    style="display:none; color: green; margin-top:8px; font-weight:bold;">تم الحفظ</div>
+                            </div>
+                            <hr>
+                            <h3>نسخ احتياطي</h3>
+                            <button onclick="exportDB()">تحميل نسخة احتياطية</button>
+                            <input type="file" id="importFile" accept=".json" style="margin-right: 10px;">
+                            <button onclick="importDB()" class="btn-danger">استعادة النسخة</button>
+                        </div>
+
+                        <div id="settings-subtab-holidays" style="display:none;">
+                            <div class="form-group"
+                                style="flex-direction: column; align-items: flex-start; max-width: 600px;">
+                                <input type="hidden" id="holidayEditId">
+                                <div class="form-control" style="width:100%;"><label>اسم المناسبة / العيد</label><input
+                                        type="text" id="holidayName" placeholder="مثال: عيد الفطر"></div>
+                                <div class="form-control" style="width:100%;"><label>التاريخ</label><input type="date"
+                                        id="holidayDate"></div>
+                                <div style="display:flex; gap:10px; margin-top:8px;"><button id="btnSaveHoliday"
+                                        onclick="saveHoliday()">حفظ
+                                        المناسبة</button><button class="btn-warning"
+                                        onclick="resetHolidayForm()">إلغاء</button></div>
+                            </div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>الاسم</th>
+                                        <th>التاريخ</th>
+                                        <th>إجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="holidaysTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div id="settings-subtab-shifts" style="display:none;">
+                            <div class="form-group"
+                                style="flex-direction: column; align-items: flex-start; max-width: 620px;">
+                                <div class="form-control" style="width:100%;"><label>بداية اليوم التشغيلي</label><input
+                                        type="time" id="settingsOperationalDayStart"></div>
+                                <small style="color:#666; margin-top:5px; display:block;">يبدأ اليوم التشغيلي من هذا
+                                    الوقت ويستمر حتى قبل نفس الوقت في اليوم التالي.</small>
+                                <hr>
+                                <h3>إدارة الدوام</h3>
+                                <input type="hidden" id="shiftEditId">
+                                <input type="hidden" id="selectedShiftId">
+                                <div class="form-control" style="width:100%;"><label>اسم الدوام</label><input
+                                        type="text" id="shiftName" placeholder="مثال: دوام صباحي"></div>
+                                <!-- MODIFIED: إضافة قائمة اختيار الدوام لتسهيل تحديد الدوام قبل إضافة الفترات
+                                     (الأصل: لم يكن هناك حقل اختيار مباشر؛ كان المستخدم يضغط على زر "تحديد" في الجدول) -->
+                                <div class="form-control" style="width:100%;"><label>اختر دوام لتعديل فتراته</label>
+                                    <select id="selectedShiftSelect">
+                                        <option value="">اختر دواما</option>
+                                    </select>
+                                </div>
+                                <div style="display:flex; gap:10px; margin-top:8px;"><button id="btnSaveShift"
+                                        onclick="saveShift()">حفظ الدوام</button><button class="btn-warning"
+                                        onclick="resetShiftForm()">إلغاء</button></div>
+                            </div>
+                            <div class="table-wrapper" style="margin-top: 15px;">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>اسم الدوام</th>
+                                            <th>عدد الفترات</th>
+                                            <th>إجراءات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="workShiftsTableBody"></tbody>
+                                </table>
+                            </div>
+                            <div id="shiftPeriodsSection" style="display:none; margin-top: 20px;">
+                                <h4>فترات الدوام: <span id="selectedShiftName"></span></h4>
+                                <div class="form-group"
+                                    style="flex-direction: column; align-items: flex-start; max-width: 520px;">
+                                    <input type="hidden" id="periodEditId">
+                                    <div class="form-control" style="width:100%;"><label>اسم الفترة</label><input
+                                            type="text" id="periodName" placeholder="مثال: الفترة الأولى"></div>
+                                    <div
+                                        style="display:grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap:8px; width:100%;">
+                                        <div class="form-control"><label>بداية الفترة</label><input type="time"
+                                                id="periodStart"></div>
+                                        <div class="form-control"><label>نهاية الفترة</label><input type="time"
+                                                id="periodEnd"></div>
+                                    </div>
+                                    <div style="display:flex; gap:10px; margin-top:8px;"><button id="btnSavePeriod"
+                                            onclick="saveShiftPeriod()">حفظ الفترة</button><button class="btn-warning"
+                                            onclick="resetPeriodForm()">إلغاء</button></div>
+                                </div>
+                                <div class="table-wrapper" style="margin-top:15px;">
+                                    <table>
+                                        <thead>
+                                            <tr>
+                                                <th>اسم الفترة</th>
+                                                <th>بداية</th>
+                                                <th>نهاية</th>
+                                                <th>إجراءات</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="shiftPeriodsTableBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- واجهة معاينة الطباعة -->
+        <div id="printPreviewModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>معاينة الطباعة</h3>
+                    <span class="close" onclick="closePrintPreview()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="print-preview-controls">
+                        <div class="form-control">
+                            <label>حجم الورق:</label>
+                            <select id="previewPaperSize" onchange="updatePrintPreview()">
+                                <option value="A4">A4</option>
+                                <option value="A5">A5</option>
+                                <option value="Letter">Letter</option>
+                                <option value="Legal">Legal</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label>اتجاه الطباعة:</label>
+                            <select id="previewOrientation" onchange="updatePrintPreview()">
+                                <option value="portrait">عمودي</option>
+                                <option value="landscape">أفقي</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span id="pageCount">عدد الصفحات: 0</span>
+                        </div>
+                    </div>
+                    <div id="printPreviewContent" class="print-preview-content">
+                        <!-- سيتم تحميل محتوى المعاينة هنا -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="printFromPreview()" style="background-color: var(--primary);">طباعة</button>
+                    <button onclick="closePrintPreview()" class="btn-warning">إغلاق</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- css للمعاينة -->
+        <style>
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.5);
+                overflow: auto;
+            }
+
+            .modal-content {
+                background-color: #fefefe;
+                margin: 5% auto;
+                padding: 20px;
+                border: 1px solid #888;
+                width: 90%;
+                max-width: 1200px;
+                max-height: 90vh;
+                overflow: auto;
+                direction: rtl;
+            }
+
+            .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #ddd;
+                padding-bottom: 10px;
+                margin-bottom: 15px;
+            }
+
+            .modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+                margin-top: 20px;
+                border-top: 1px solid #ddd;
+                padding-top: 10px;
+            }
+
+            .close {
+                color: #aaa;
+                font-size: 28px;
+                font-weight: bold;
+                cursor: pointer;
+            }
+
+            .close:hover,
+            .close:focus {
+                color: black;
+                text-decoration: none;
+            }
+
+            .print-preview-controls {
+                display: flex;
+                gap: 15px;
+                margin-bottom: 15px;
+                flex-wrap: wrap;
+            }
+
+            .print-preview-content {
+                border: 1px solid #ddd;
+                padding: 15px;
+                background: white;
+                min-height: 400px;
+                overflow: auto;
+            }
+        </style>
+
+        <!-- csrf_token -->
+        <script src="/assets/tageep/js/tageep.js?v=20260712-1"></script>
+</body>
+
+</html>

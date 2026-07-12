@@ -11,6 +11,10 @@ let backendAvailable = false;
 let isSavingRemote = false;
 let remoteSavePending = false;
 let remoteSavePromise = null;
+let lastRemoteSaveError = null;
+let remoteRefreshPromise = null;
+let remoteAutoRefreshTimer = null;
+let remoteFocusRefreshBound = false;
 
 let db = {
     settings: { companyName: 'الشركة', logo: '', weeklyOffDays: ['5'], operationalDayStart: '06:00' },
@@ -141,6 +145,123 @@ function buildDailyStatusOptions(selectedStatus) {
         .join('');
 }
 
+function getReportTitle() {
+    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    const monthIdx = parseInt(document.getElementById('reportMonth')?.value, 10) - 1;
+    const year = document.getElementById('reportYear')?.value || '';
+    const monthName = monthNames[monthIdx] || '';
+    return `تقرير الإجازات خلال شهر ${monthName} ${year}`.trim();
+}
+
+function getSafeFileName(name) {
+    const fallback = 'tageep-export';
+    return String(name || fallback)
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim() || fallback;
+}
+
+function prepareTableForExport(table) {
+    const tableClone = table.cloneNode(true);
+    const sourceRows = Array.from(table.querySelectorAll('tr'));
+    const cloneRows = Array.from(tableClone.querySelectorAll('tr'));
+
+    tableClone.querySelectorAll('.col-toggle-btn, .sort-arrow, button, input, select, textarea').forEach(el => el.remove());
+
+    cloneRows.forEach((row, rowIdx) => {
+        const sourceCells = Array.from(sourceRows[rowIdx]?.children || []);
+        Array.from(row.children).forEach((cell, cellIdx) => {
+            const sourceCell = sourceCells[cellIdx];
+            const sourceStyle = sourceCell ? window.getComputedStyle(sourceCell) : null;
+            const isHidden = sourceCell && (
+                sourceCell.classList.contains('no-print') ||
+                sourceCell.style.display === 'none' ||
+                (sourceStyle && (sourceStyle.display === 'none' || sourceStyle.visibility === 'hidden'))
+            );
+            if (isHidden) cell.remove();
+        });
+    });
+
+    return tableClone;
+}
+
+function buildExcelHtml(table, title) {
+    const tableClone = prepareTableForExport(table);
+    const firstRow = tableClone.querySelector('tr');
+    const colCount = firstRow ? firstRow.cells.length : 1;
+    const companyName = db.settings.companyName || '';
+    const logoUrl = db.settings.logo || '';
+    const logoHtml = logoUrl
+        ? `<img src="${logoUrl}" style="max-height:70px;max-width:100%;object-fit:contain;" alt="شعار الشركة">`
+        : '';
+
+    const headerRowHtml = `<tr>
+        <td colspan="${colCount}" style="text-align:center;border:0;padding:8px;">
+            ${logoHtml}
+            <div style="font-size:16px;font-weight:bold;margin:4px 0;">${companyName}</div>
+            <div style="font-size:14px;font-weight:bold;margin:2px 0;">${title}</div>
+        </td>
+    </tr>`;
+
+    const originalThead = tableClone.querySelector('thead');
+    if (originalThead) {
+        originalThead.insertAdjacentHTML('afterbegin', headerRowHtml);
+    } else {
+        tableClone.insertAdjacentHTML('afterbegin', `<thead>${headerRowHtml}</thead>`);
+    }
+
+    return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #000; padding: 5px; text-align: center; mso-number-format:"\\@"; }
+        th { background-color: #dcedc8; font-weight: bold; }
+        .employee-name, .branch-name { white-space: nowrap; }
+        .state-absent { background: #ff0000; color: #ffffff; font-weight: 700; }
+        .state-annual { background: #e67e22; color: #ffffff; font-weight: 700; }
+        .state-present { background: #e8f5e9; color: #1b5e20; font-weight: 700; }
+        .state-holiday { background: #e3f2fd; color: #1565c0; font-weight: 700; }
+    </style>
+</head>
+<body>
+    ${tableClone.outerHTML}
+</body>
+</html>`;
+}
+
+function downloadExcelTable(table, title, fileName) {
+    if (!table) {
+        alert('لا يوجد جدول للتصدير');
+        return;
+    }
+
+    const excelHtml = buildExcelHtml(table, title);
+    const blob = new Blob(['\ufeff', excelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${getSafeFileName(fileName)}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+}
+
+function exportMainTableToExcel() {
+    const table = document.querySelector('#attendance-panel .table-wrapper table');
+    const dateRangeText = document.getElementById('printDateRange')?.innerText || '';
+    const title = dateRangeText ? `كشف تعقيب الموظفين - ${dateRangeText}` : 'كشف تعقيب الموظفين';
+    downloadExcelTable(table, title, `كشف تعقيب الموظفين ${dateRangeText}`);
+}
+
+function exportReportTableToExcel() {
+    const table = document.querySelector('#report-panel .table-wrapper table');
+    const title = getReportTitle();
+    downloadExcelTable(table, title, title);
+}
+
 // دالة مساعدة: ترجع الموظفين المقيدين بفرع معين، أو كل الموظفين إذا كان الفرع 'all'
 function getFilteredEmployeesByBranch(branchId) {
     if (!branchId || branchId === 'all' || branchId === '') return db.employees;
@@ -155,10 +276,24 @@ function saveDB(options = {}) {
         console.warn('saveDB: local save failed', e);
     }
     // Try to persist to remote in background; don't block UI
-    const remoteSave = persistRemoteState().catch(err => { console.warn('saveDB: remote persist failed', err); });
+    const remoteSave = persistRemoteState().catch(err => {
+        console.warn('saveDB: remote persist failed', err);
+        return false;
+    });
     // Auto-refresh the current view immediately
     refreshCurrentView();
-    return options.waitRemote ? remoteSave : undefined;
+    return options.waitRemote ? remoteSave.then(() => backendAvailable && !lastRemoteSaveError) : undefined;
+}
+
+async function saveDBOrAlert(successMessage) {
+    const saved = await saveDB({ waitRemote: true });
+    if (!saved) {
+        const details = lastRemoteSaveError?.message ? `\n${lastRemoteSaveError.message}` : '';
+        alert(`لم يتم حفظ العملية في قاعدة بيانات Frappe.${details}\nيرجى إعادة تسجيل الدخول أو تحديث الصفحة ثم المحاولة مرة أخرى.`);
+        return false;
+    }
+    if (successMessage) alert(successMessage);
+    return true;
 }
 
 // دالة لتحديث الواجهة الحالية تلقائياً بعد الحفظ
@@ -328,7 +463,7 @@ function refreshAllDropdowns() {
     branchSelects.forEach(select => {
         if (!select) return;
         const savedValue = select.value;
-        const isFilter = select.id === 'filterBranch' || select.id === 'userBranch' || select.id === 'dailyFilterBranch' || select.id === 'archiveFilterBranch' || select.id === 'reportBranch' || select.id === 'empFilterBranch';
+        const isFilter = select.id === 'filterBranch' || select.id === 'userBranch' || select.id === 'dailyFilterBranch' || select.id === 'archiveFilterBranch' || select.id === 'reportBranch' || select.id === 'empFilterBranch' || select.id === 'sentFilterBranch';
         select.innerHTML = isFilter ? '<option value="all">الكل</option>' : '';
         empsForBranches.forEach(b => {
             select.innerHTML += `<option value="${b.id}">${b.name}</option>`;
@@ -540,7 +675,69 @@ async function apiRequest(url, options = {}) {
 
 async function loadRemoteState() {
     normalizeAppState(await apiRequest(API_ROUTES.state, { method: 'GET' }));
+    try {
+        localStorage.setItem('tageep_state', JSON.stringify(db));
+    } catch (error) {
+        console.warn('loadRemoteState: local cache update failed', error);
+    }
     backendAvailable = true;
+}
+
+function renderCurrentView() {
+    const activeTab = document.querySelector('.tab-content.active');
+    if (!activeTab) return;
+    switch (activeTab.id) {
+        case 'tab-main':
+            renderMainTable();
+            renderReportTable();
+            break;
+        case 'tab-daily':
+            renderDailyFollowups();
+            renderDailyExtras();
+            renderDailyAdvances();
+            break;
+        case 'tab-archive':
+            renderArchiveReports();
+            break;
+        case 'tab-sent':
+            renderSentReports();
+            break;
+        case 'tab-employees':
+            renderEmployees();
+            break;
+        case 'tab-branches':
+            renderBranches();
+            break;
+        case 'tab-users':
+            renderUsers();
+            break;
+        case 'tab-settings':
+            renderHolidays();
+            renderWorkShifts();
+            renderShiftPeriods();
+            break;
+    }
+}
+
+async function refreshStateFromServer(options = {}) {
+    if (!getAccessToken() || isSavingRemote) return false;
+    if (remoteRefreshPromise) return remoteRefreshPromise;
+    remoteRefreshPromise = (async () => {
+        try {
+            await loadRemoteState();
+            if (options.render !== false) {
+                refreshAllDropdowns();
+                renderCurrentView();
+            }
+            return true;
+        } catch (error) {
+            console.warn('Failed to refresh Tageep state from server:', error);
+            return false;
+        } finally {
+            remoteRefreshPromise = null;
+        }
+    })();
+    return remoteRefreshPromise;
 }
 
 async function persistRemoteState() {
@@ -551,6 +748,7 @@ async function persistRemoteState() {
     isSavingRemote = true;
     remoteSavePromise = (async () => {
         try {
+            lastRemoteSaveError = null;
             do {
                 remoteSavePending = false;
                 const state = await apiRequest(API_ROUTES.saveState, {
@@ -565,6 +763,7 @@ async function persistRemoteState() {
             } while (remoteSavePending);
         } catch (error) {
             backendAvailable = false;
+            lastRemoteSaveError = error;
             console.warn('API save failed:', error);
             if (getAccessToken()) {
                 alert(`تعذر حفظ البيانات في قاعدة بيانات Frappe.\n${error.message || ''}`);
@@ -756,7 +955,7 @@ function enableSearchableSelects() {
         // تعديل جديد: إضافة قوائم السلف للبحث مثل قوائم الإضافي.
         // الكود الأصلي معطل: 'dailyEmp', 'dailyFilterEmp', 'extraEmp', 'extraFilterEmp',
         'dailyEmp', 'dailyFilterEmp', 'extraEmp', 'extraFilterEmp', 'advanceEmp', 'advanceFilterEmp',
-        'empShift', 'reportShift', 'reportPeriod',
+        'empShift', 'reportShift', 'reportPeriod', 'reportEmp',
         'selectedShiftSelect'
     ];
     selectIds.forEach(id => {
@@ -1362,6 +1561,7 @@ function switchMainPanel(panelId) {
         renderMainTable();
     } else if (panelId === 'report-panel') {
         renderReportTable();
+        refreshStateFromServer();
     } else if (panelId === 'summary-panel') {
         renderSummaryTable();
     }
@@ -1506,6 +1706,18 @@ function renderAll() {
         if (isManagerUser && userBranches.length === 1) {
             reportBranch.value = userBranches[0].id;
             reportBranch.disabled = true;
+        }
+    }
+    // تعبئة قائمة الموظفين في فلتر التقرير (مرتبطة بكل الموظفين)
+    const reportEmp = document.getElementById('reportEmp');
+    if (reportEmp) {
+        const savedVal = reportEmp.value;
+        reportEmp.innerHTML = '<option value="all">الكل</option>';
+        db.employees.forEach(e => {
+            reportEmp.innerHTML += `<option value="${e.id}">${e.name}${e.employeeNumber ? ' (' + e.employeeNumber + ')' : ''}</option>`;
+        });
+        if (savedVal && db.employees.find(e => e.id === savedVal)) {
+            reportEmp.value = savedVal;
         }
     }
     const reportShift = document.getElementById('reportShift');
@@ -2464,12 +2676,14 @@ function renderReportTable() {
     const branchId = document.getElementById('reportBranch').value;
     const shiftId = document.getElementById('reportShift').value;
     const periodId = document.getElementById('reportPeriod').value;
+    const empId = document.getElementById('reportEmp')?.value || 'all';
     const from = document.getElementById('reportFrom').value;
     const to = document.getElementById('reportTo').value;
 
     const filtered = db.employees.filter(emp => {
         return (branchId === 'all' || emp.branchId === branchId)
-            && (shiftId === 'all' || emp.shiftId === shiftId);
+            && (shiftId === 'all' || emp.shiftId === shiftId)
+            && (empId === 'all' || emp.id === empId);
     });
 
     const workingDates = getWorkingDatesBetween(from, to);
@@ -4062,8 +4276,9 @@ function switchArchivePanel(panelId) {
 }
 
 // ========== Send Daily Records (المرحلة الأولى: إرسال التعقيب اليومي) ==========
-function sendDailyRecords() {
+async function sendDailyRecords() {
     if (!canPerform('daily', 'view')) return alert('ليس لديك صلاحية لإرسال التعقيب');
+    await refreshStateFromServer({ render: false });
     const branchId = document.getElementById('dailyFilterBranch').value;
     const dateFrom = document.getElementById('dailyFilterFrom').value;
     const dateTo = document.getElementById('dailyFilterTo').value;
@@ -4093,10 +4308,17 @@ function sendDailyRecords() {
     const recordIds = new Set(records.map(r => r.id));
     db.dailyFollowUps = db.dailyFollowUps.filter(item => !recordIds.has(item.id));
 
-    saveDB();
+    const saved = await saveDBOrAlert(`تم إرسال ${records.length} سجل تعقيب إلى مدير الموارد البشرية بنجاح. يمكنك متابعة الحالة في "التعقيب المرسل".`);
+    if (!saved) {
+        db.sentReports = db.sentReports.filter(report => report.id !== reportId);
+        db.dailyFollowUps = db.dailyFollowUps.concat(records);
+        localStorage.setItem('tageep_state', JSON.stringify(db));
+        renderDailyFollowups();
+        renderSentReports();
+        return;
+    }
     renderDailyFollowups();
     renderSentReports();
-    alert(`تم إرسال ${records.length} سجل تعقيب إلى مدير الموارد البشرية بنجاح. يمكنك متابعة الحالة في "أرشفة التعقيب المرحل ← التعقيب المرسل".`);
 }
 
 // ========== Render Sent Reports (المرحلة الثانية: عرض التعقيب المرسل) ==========
@@ -4243,8 +4465,9 @@ function editSentReport(reportId) {
 }
 
 // دالة حفظ تعديلات التعقيب المرسل
-function saveSentReportEdits(reportId) {
+async function saveSentReportEdits(reportId) {
     if (!canPerform('archive', 'edit')) return alert('ليس لديك صلاحية لتعديل التعقيب المرسل');
+    await refreshStateFromServer({ render: false });
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
 
@@ -4331,7 +4554,15 @@ function saveSentReportEdits(reportId) {
         });
     }
 
-    saveDB();
+    const saved = await saveDBOrAlert();
+    if (!saved) {
+        await loadRemoteState().catch(error => console.warn('Failed to reload state after save failure:', error));
+        renderSentReports();
+        renderMainTable();
+        renderArchiveReports();
+        closeEditArchivedModal();
+        return;
+    }
     closeEditArchivedModal();
 
     let summaryMsg = '✅ تم حفظ التعديلات بنجاح!\n\n';
@@ -4351,8 +4582,9 @@ function saveSentReportEdits(reportId) {
 }
 
 // ========== Transfer Sent Report to Main (المرحلة الثالثة: ترحيل التعقيب المرسل إلى الرئيسي) ==========
-function transferSentReportToMain(reportId) {
+async function transferSentReportToMain(reportId) {
     if (!currentUser || currentUser.role !== 'admin') return alert('فقط مدير الموارد البشرية يمكنه ترحيل التعقيب إلى الرئيسي');
+    await refreshStateFromServer({ render: false });
 
     const report = db.sentReports.find(r => r.id === reportId);
     if (!report) return alert('التقرير غير موجود');
@@ -4398,10 +4630,16 @@ function transferSentReportToMain(reportId) {
         fileName: fileName
     });
 
-    saveDB();
+    const saved = await saveDBOrAlert(`تم ترحيل ${report.entries.length} سجل من "${report.branchName}" إلى التعقيب الرئيسي بنجاح.`);
+    if (!saved) {
+        await loadRemoteState().catch(error => console.warn('Failed to reload state after transfer save failure:', error));
+        renderSentReports();
+        renderMainTable();
+        renderArchiveReports();
+        return;
+    }
     renderSentReports();
     renderMainTable();
-    alert(`تم ترحيل ${report.entries.length} سجل من "${report.branchName}" إلى التعقيب الرئيسي بنجاح.`);
 }
 
 // ========== Preview Sent Report (معاينة طباعة التعقيب المرسل) ==========
@@ -5615,6 +5853,7 @@ function switchTab(tabId) {
         case 'tab-main':
             renderMainTable();
             renderReportTable();
+            refreshStateFromServer();
             break;
         case 'tab-daily':
             renderDailyFollowups();
@@ -5624,9 +5863,11 @@ function switchTab(tabId) {
             break;
         case 'tab-archive':
             renderArchiveReports();
+            refreshStateFromServer();
             break;
         case 'tab-sent':
             renderSentReports();
+            refreshStateFromServer();
             break;
         case 'tab-employees':
             renderEmployees();
@@ -5642,6 +5883,26 @@ function switchTab(tabId) {
             renderWorkShifts();
             renderShiftPeriods();
             break;
+    }
+}
+
+function startRemoteAutoRefresh() {
+    if (remoteAutoRefreshTimer) return;
+    remoteAutoRefreshTimer = setInterval(() => {
+        const activeTabId = document.querySelector('.tab-content.active')?.id;
+        if (['tab-main', 'tab-archive', 'tab-sent'].includes(activeTabId)) {
+            refreshStateFromServer();
+        }
+    }, 15000);
+
+    if (!remoteFocusRefreshBound) {
+        window.addEventListener('focus', () => {
+            const activeTabId = document.querySelector('.tab-content.active')?.id;
+            if (['tab-main', 'tab-archive', 'tab-sent'].includes(activeTabId)) {
+                refreshStateFromServer();
+            }
+        });
+        remoteFocusRefreshBound = true;
     }
 }
 
@@ -5687,6 +5948,7 @@ function showApp() {
     const savedTab = localStorage.getItem('appCurrentTab') || 'tab-main';
     const tabKey = savedTab.replace('tab-', '');
     if (canViewTab(tabKey)) switchTab(savedTab);
+    startRemoteAutoRefresh();
 }
 
 function logout() {
@@ -5699,6 +5961,10 @@ function logout() {
     if (displaySpan) displaySpan.style.display = 'none';
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) logoutBtn.style.display = 'none';
+    if (remoteAutoRefreshTimer) {
+        clearInterval(remoteAutoRefreshTimer);
+        remoteAutoRefreshTimer = null;
+    }
     document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
     document.getElementById('rememberPassword').checked = false;

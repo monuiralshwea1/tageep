@@ -517,6 +517,37 @@ def get_state():
 	return _get_state()
 
 
+def _record_key(record):
+	if not isinstance(record, dict):
+		return None
+	if record.get("id"):
+		return str(record.get("id"))
+	if record.get("empId") and record.get("date") and record.get("type"):
+		return f"{record.get('empId')}::{record.get('date')}::{record.get('type')}"
+	return None
+
+
+def _merge_missing_records(current_state, incoming_state, list_key):
+	current_items = current_state.get(list_key) or []
+	incoming_items = incoming_state.get(list_key) or []
+	if not isinstance(current_items, list) or not isinstance(incoming_items, list):
+		return
+
+	seen = set()
+	for item in incoming_items:
+		key = _record_key(item)
+		if key:
+			seen.add(key)
+
+	for item in current_items:
+		key = _record_key(item)
+		if key and key not in seen:
+			incoming_items.append(item)
+			seen.add(key)
+
+	incoming_state[list_key] = incoming_items
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def save_state(state=None):
 	current_state = _get_state()
@@ -544,5 +575,8 @@ def save_state(state=None):
 			_same_tageep_user(item, user.get("id"), user.get("name")) for item in incoming_users
 		):
 			state["users"] = current_users
+		if user.get("role") != "admin":
+			for shared_key in ("sentReports", "archivedReports", "absences"):
+				_merge_missing_records(current_state, state, shared_key)
 
 	return _save_state(state)

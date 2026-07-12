@@ -127,6 +127,8 @@
                         <div style="display: flex; gap: 10px;">
                             <button onclick="printVisibleTable()" style="background-color: var(--primary);">🖨️ طباعة
                                 الجدول</button>
+                            <button onclick="exportMainTableToExcel()" style="background-color:#1f8f4d; margin-left:8px;">📊
+                                تصدير Excel</button>
                             <button onclick="openPrintPreview()" style="background-color:#2ecc71; margin-left:8px;">👁️
                                 معاينة الطباعة</button>
                             <button onclick="resetMainFilters()"
@@ -192,6 +194,12 @@
                             </select>
                         </div>
                         <div class="form-control">
+                            <label>الموظف:</label>
+                            <select id="reportEmp" onchange="renderReportTable()">
+                                <option value="all">الكل</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
                             <label>الشهر:</label>
                             <select id="reportMonth" onchange="reportMonthChanged()">
                                 <option value="1">يناير</option>
@@ -226,6 +234,8 @@
                                 التقرير</button>
                             <button onclick="printReportTable()" style="background-color:#607d8b; margin-left:8px;">🖨️
                                 طباعة التقرير</button>
+                            <button onclick="exportReportTableToExcel()" style="background-color:#1f8f4d; margin-left:8px;">📊
+                                تصدير Excel</button>
                             <button onclick="previewReportTable()"
                                 style="background-color:#2ecc71; margin-left:8px;">👁️
                                 معاينة الطباعة</button>
@@ -974,7 +984,7 @@
         </style>
 
         <!-- csrf_token -->
-        <script src="/assets/tageep/js/tageep.js?v=20260706-1"></script>
+        <script src="/assets/tageep/js/tageep.js?v=20260712-4"></script>
 </body>
 
 </html>

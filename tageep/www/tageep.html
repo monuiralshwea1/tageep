@@ -724,6 +724,9 @@
                         <button class="nav-btn"
                             style="background:none; color:var(--primary); margin:0; padding:6px 10px; border:1px solid var(--border);"
                             id="settings-tab-shifts-btn" onclick="showSettingsSubtab('shifts')">الدوام والفترات</button>
+                        <button class="nav-btn"
+                            style="background:none; color:var(--primary); margin:0; padding:6px 10px; border:1px solid var(--border);"
+                            id="settings-tab-activity-btn" onclick="showSettingsSubtab('activity')">📋 المحفوظات</button>
                     </div>
                     <div style="flex:1;">
                         <div id="settings-subtab-general" style="display:block;">
@@ -863,6 +866,77 @@
                                         <tbody id="shiftPeriodsTableBody"></tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="settings-subtab-activity" style="display:none;">
+                        <div class="form-group" style="flex-direction: column; align-items: flex-start; max-width: 100%;">
+                            <h3>📋 سجل المحفوظات</h3>
+                            <p style="color:#666; font-size:13px; margin-bottom:10px;">سجل بجميع العمليات التي تمت في النظام (إضافة، تعديل، حذف) مع اسم المستخدم والتاريخ.</p>
+                            <div class="filters" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                                <div class="form-control" style="min-width:150px;">
+                                    <label>نوع العملية</label>
+                                    <select id="activityFilterAction" onchange="renderActivityLog()">
+                                        <option value="all">الكل</option>
+                                        <option value="إضافة">إضافة</option>
+                                        <option value="تعديل">تعديل</option>
+                                        <option value="حذف">حذف</option>
+                                    </select>
+                                </div>
+                                <div class="form-control" style="min-width:150px;">
+                                    <label>القسم</label>
+                                    <select id="activityFilterTarget" onchange="renderActivityLog()">
+                                        <option value="all">الكل</option>
+                                        <option value="موظف">موظف</option>
+                                        <option value="فرع">فرع</option>
+                                        <option value="مستخدم">مستخدم</option>
+                                        <option value="تعقيب يومي">تعقيب يومي</option>
+                                        <option value="إضافي">إضافي</option>
+                                        <option value="سلفة">سلفة</option>
+                                        <option value="مناسبة">مناسبة</option>
+                                        <option value="دوام">دوام</option>
+                                        <option value="فترة دوام">فترة دوام</option>
+                                        <option value="إعدادات">إعدادات</option>
+                                        <option value="تعقيب مرسل">تعقيب مرسل</option>
+                                        <option value="أرشفة">أرشفة</option>
+                                    </select>
+                                </div>
+                                <div class="form-control" style="min-width:150px;">
+                                    <label>المستخدم</label>
+                                    <select id="activityFilterUser" onchange="renderActivityLog()">
+                                        <option value="all">الكل</option>
+                                    </select>
+                                </div>
+                                <div class="form-control" style="min-width:130px;">
+                                    <label>من تاريخ</label>
+                                    <input type="date" id="activityFilterFrom" onchange="renderActivityLog()">
+                                </div>
+                                <div class="form-control" style="min-width:130px;">
+                                    <label>إلى تاريخ</label>
+                                    <input type="date" id="activityFilterTo" onchange="renderActivityLog()">
+                                </div>
+                                <div style="display:flex; align-items:flex-end; gap:5px;">
+                                    <button onclick="renderActivityLog()" style="background-color:var(--primary);">🔍 عرض</button>
+                                    <button onclick="clearActivityFilters()" style="background-color:#607d8b;">🔄 إعادة ضبط</button>
+                                    <button onclick="clearActivityLog()" class="btn-danger" style="background-color:#c0392b;">🗑️ مسح السجل</button>
+                                </div>
+                            </div>
+                            <div class="table-wrapper">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th style="width:40px;">م</th>
+                                            <th>التاريخ والوقت</th>
+                                            <th>المستخدم</th>
+                                            <th>نوع العملية</th>
+                                            <th>القسم</th>
+                                            <th>الاسم</th>
+                                            <th>التفاصيل</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="activityLogTableBody"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

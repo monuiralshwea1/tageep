@@ -27,6 +27,8 @@ let db = {
     // تعديل جديد: قائمة السلف اليومية، بنفس بنية الإضافي تقريباً.
     // الكود الأصلي لم يكن يحتوي على dailyAdvances.
     dailyAdvances: [], // {id, empId, date, amount, notes, createdAt}
+    // تعديل جديد: سجل المحفوظات (نشاطات المستخدمين)
+    activityLogs: [], // {id, user, userName, action, targetType, targetId, targetName, details, timestamp}
     archivedReports: [], // {id, branchId, branchName, date, createdAt, entries, fileName}
     sentReports: [], // {id, branchId, branchName, date, createdAt, entries, status:'pending'|'transferred'}
     holidays: [], // {id, name, date}
@@ -64,6 +66,11 @@ function normalizeAppState(data) {
         dailyAdvances: (data.dailyAdvances || []).map(item => ({
             ...item,
             amount: parseFloat(item.amount) || 0
+        })),
+        // تعديل جديد: تطبيع سجل المحفوظات عند تحميل الحالة
+        activityLogs: (data.activityLogs || []).map(item => ({
+            ...item,
+            timestamp: item.timestamp || new Date().toISOString()
         })),
         archivedReports: data.archivedReports || [],
         sentReports: data.sentReports || [],
@@ -117,6 +124,32 @@ function getEmployeeLabel(id) {
     const emp = findEmployeeById(id);
     if (!emp) return id || '';
     return `${emp.name || ''}${emp.employeeNumber ? ' (' + emp.employeeNumber + ')' : ''}`;
+}
+
+// ========== سجل المحفوظات (نشاطات المستخدمين) ==========
+// تعديل جديد: دالة تسجيل النشاطات في سجل المحفوظات
+function logActivity(action, targetType, targetId, targetName, details) {
+    if (!currentUser || !currentUser.id) {
+        console.warn('logActivity skipped: no currentUser', { action, targetType, targetId, targetName, details, currentUser });
+        return;
+    }
+    const entry = {
+        id: 'log' + Date.now() + Math.random().toString(36).slice(2, 6),
+        user: currentUser.id,
+        userName: currentUser.name || currentUser.id,
+        action: action,
+        targetType: targetType,
+        targetId: targetId || '',
+        targetName: targetName || '',
+        details: details || '',
+        timestamp: new Date().toISOString()
+    };
+    db.activityLogs = db.activityLogs || [];
+    db.activityLogs.push(entry);
+    // الاحتفاظ بآخر 500 سجل فقط لمنع تضخم قاعدة البيانات
+    if (db.activityLogs.length > 500) {
+        db.activityLogs = db.activityLogs.slice(-500);
+    }
 }
 
 // تعديل جديد: تعريف مركزي لأنواع حالات التعقيب حتى تشمل "إجازة أخرى".
@@ -332,6 +365,7 @@ function refreshCurrentView() {
             renderHolidays();
             renderWorkShifts();
             renderShiftPeriods();
+            renderActivityLog();
             break;
         case 'tab-archive':
             renderArchiveReports();
@@ -673,8 +707,51 @@ async function apiRequest(url, options = {}) {
     return parseApiResponse(response);
 }
 
+// دمج سجلات المحفوظات (activityLogs) بين الحالة المحلية والحالة القادمة من السيرفر
+// بناءً على المعرّف (id) لتجنب فقدان السجلات المحلية التي لم تُرسل بعد بسبب سباق التحميل.
+function mergeActivityLogs(localLogs, remoteLogs) {
+    const local = Array.isArray(localLogs) ? localLogs : [];
+    const remote = Array.isArray(remoteLogs) ? remoteLogs : [];
+    const seen = new Set();
+    const merged = [];
+    // نبقي الأحدث أولاً (السجلات المحلية المرسلة تكون عادةً في الـ remote)
+    remote.forEach(log => {
+        const key = log && log.id;
+        if (key && seen.has(key)) return;
+        if (key) seen.add(key);
+        merged.push(log);
+    });
+    local.forEach(log => {
+        const key = log && log.id;
+        if (key && seen.has(key)) return;
+        if (key) seen.add(key);
+        merged.push(log);
+    });
+    return merged;
+}
+
+// دمج قائمة المستخدمين بناءً على المعرّف لتجنب فقدان مستخدمين محليين لم تُرسل بعد
+function mergeUsers(localUsers, remoteUsers) {
+    const local = Array.isArray(localUsers) ? localUsers : [];
+    const remote = Array.isArray(remoteUsers) ? remoteUsers : [];
+    const byId = {};
+    remote.forEach(u => { if (u && u.id) byId[u.id] = u; });
+    local.forEach(u => { if (u && u.id && !byId[u.id]) byId[u.id] = u; });
+    return Object.values(byId);
+}
+
 async function loadRemoteState() {
-    normalizeAppState(await apiRequest(API_ROUTES.state, { method: 'GET' }));
+    const remoteState = await apiRequest(API_ROUTES.state, { method: 'GET' });
+    // دمج سجلات المحفوظات والمستخدمين مع الحالة المحلية قبل تطبيق الحالة القادمة
+    // لتجنب فقدان أي سجلات محلية لم تُرسل للسيرفر بعد (سباق التحميل التلقائي).
+    const prevActivityLogs = db.activityLogs;
+    const prevUsers = db.users;
+    normalizeAppState(remoteState);
+    const mergedLogs = mergeActivityLogs(prevActivityLogs, db.activityLogs);
+    db.activityLogs = mergedLogs.slice(-500);
+    if (Array.isArray(prevUsers) && prevUsers.length) {
+        db.users = mergeUsers(prevUsers, db.users);
+    }
     try {
         localStorage.setItem('tageep_state', JSON.stringify(db));
     } catch (error) {
@@ -756,7 +833,14 @@ async function persistRemoteState() {
                     body: JSON.stringify({ state: db })
                 });
                 if (!remoteSavePending) {
+                    const prevActivityLogs = db.activityLogs;
+                    const prevUsers = db.users;
                     normalizeAppState(state);
+                    const mergedLogs = mergeActivityLogs(prevActivityLogs, db.activityLogs);
+                    db.activityLogs = mergedLogs.slice(-500);
+                    if (Array.isArray(prevUsers) && prevUsers.length) {
+                        db.users = mergeUsers(prevUsers, db.users);
+                    }
                 }
                 backendAvailable = true;
                 console.info('State persisted to backend successfully.');
@@ -1151,7 +1235,7 @@ window.updatePrintPreview = function () {
         </div></td></tr></tfoot>`;
         const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
         */
-        
+
         // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
         // الفوتر في صف واحد بأربعة أعمدة.
         const footerNewHtml = `
@@ -1343,7 +1427,7 @@ window.printVisibleTable = function () {
         </div></td></tr></tfoot>`;
         const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
         */
-        
+
         // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
         // الفوتر في صف واحد بأربعة أعمدة.
         const footerNewHtml = `
@@ -1525,10 +1609,17 @@ function initDates() {
     const advanceFilterFrom = document.getElementById('advanceFilterFrom');
     if (advanceFilterTo) advanceFilterTo.value = today.toISOString().split('T')[0];
     if (advanceFilterFrom) advanceFilterFrom.value = lastWeek.toISOString().split('T')[0];
+    // تعيين فلاتر التاريخ في التقرير افتراضياً: من أول الشهر إلى آخر الشهر الحالي
     const reportFrom = document.getElementById('reportFrom');
     const reportTo = document.getElementById('reportTo');
-    if (reportFrom) reportFrom.value = lastWeek.toISOString().split('T')[0];
-    if (reportTo) reportTo.value = today.toISOString().split('T')[0];
+    function formatLocalDate(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+    if (reportFrom) reportFrom.value = formatLocalDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    if (reportTo) reportTo.value = formatLocalDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
     // تعيين فلاتر التاريخ في صفحة الأرشفة (التعقيب المؤرشيف والمرسل) افتراضياً:
     // من يوم أمس إلى اليوم الحالي
     const archiveFilterFrom = document.getElementById('archiveFilterFrom');
@@ -2280,8 +2371,11 @@ function reportMonthChanged() {
     const firstDay = new Date(year, month - 1, 1);
     const lastDay = new Date(year, month, 0);
 
-    const fromStr = firstDay.toISOString().split('T')[0];
-    const toStr = lastDay.toISOString().split('T')[0];
+    function formatLocalDate(d) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    const fromStr = formatLocalDate(firstDay);
+    const toStr = formatLocalDate(lastDay);
 
     document.getElementById('reportFrom').value = fromStr;
     document.getElementById('reportTo').value = toStr;
@@ -2376,22 +2470,22 @@ function printReportTable() {
     // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -2402,9 +2496,9 @@ function printReportTable() {
                 </tr>
             </table>
         </div>`;
-        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+    const finalHtmlWithFooter = finalHtml + footerNewHtml;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -2561,6 +2655,14 @@ function updatePrintPreviewWithTitle(customTitle) {
                     border: 1px solid #000;
                     word-break: keep-all;
                 }
+                .employee-name,
+                .branch-name {
+                    white-space: nowrap !important;
+                    word-break: keep-all !important;
+                    overflow-wrap: normal !important;
+                }
+                .employee-name { min-width: 120px; }
+                .branch-name { min-width: 100px; }
                 th { 
                     background-color: #dcedc8; 
                     font-weight: bold;
@@ -2596,7 +2698,7 @@ function updatePrintPreviewWithTitle(customTitle) {
         // const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
 
         // const previewContent = `<!DOCTYPE html>
-                // ==================== تعديل الفوتر ====================
+        // ==================== تعديل الفوتر ====================
         // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
         // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
         /*
@@ -2608,7 +2710,7 @@ function updatePrintPreviewWithTitle(customTitle) {
         </div></td></tr></tfoot>`;
         const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
         */
-        
+
         // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
         // الفوتر في صف واحد بأربعة أعمدة.
         const footerNewHtml = `
@@ -2722,7 +2824,6 @@ function renderReportTable() {
             }
         });
     }
-    const dateRangeEl = document.getElementById('printDateRange');
     // تحديث عنوان التقرير باسم الشهر
     const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
     const monthIdx = parseInt(document.getElementById('reportMonth')?.value || '1') - 1;
@@ -2734,9 +2835,8 @@ function renderReportTable() {
     const printTitleEl = document.getElementById('printTitle');
     if (printTitleEl) printTitleEl.innerText = reportTitle;
 
-    if (dateRangeEl) {
-        dateRangeEl.innerText = `${reportTitle} (من ${from || '? '} إلى ${to || '? '})`;
-    }
+    // لا نقوم بتعديل printDateRange هنا لأنه يخص التعقيب الرئيسي فقط
+    // تحديث printDateRange يتم فقط من دالة renderMainTable()
 
     // ===== حساب المجاميع =====
     let totalExpectedAll = 0;
@@ -3165,22 +3265,22 @@ function printSummaryTable() {
     // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -3191,9 +3291,9 @@ function printSummaryTable() {
                 </tr>
             </table>
         </div>`;
-        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+    const finalHtmlWithFooter = finalHtml + footerNewHtml;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -3283,6 +3383,7 @@ function saveEmployee() {
         leaveBalance: parseFloat(document.getElementById('empLeave').value)
     };
     if (!data.name || !data.wage) return alert('أكمل البيانات');
+    const isEdit = !!id;
     if (id) {
         const idx = db.employees.findIndex(e => e.id === id);
         db.employees[idx] = data;
@@ -3290,6 +3391,7 @@ function saveEmployee() {
         db.employees.push(data);
     }
     resetEmpForm();
+    logActivity(isEdit ? 'تعديل' : 'إضافة', 'موظف', data.id, data.name, isEdit ? `تم تعديل بيانات الموظف ${data.name}` : `تم إضافة موظف جديد ${data.name}`);
     saveDB();
 }
 
@@ -3310,7 +3412,12 @@ function editEmployee(id) {
 
 function delEmployee(id) {
     if (!canPerform('employees', 'delete')) return alert('ليس لديك صلاحية لحذف الموظفين');
-    if (confirm('تأكيد الحذف؟')) { db.employees = db.employees.filter(e => e.id !== id); saveDB(); }
+    if (confirm('تأكيد الحذف؟')) {
+        const emp = db.employees.find(e => e.id === id);
+        db.employees = db.employees.filter(e => e.id !== id);
+        logActivity('حذف', 'موظف', id, emp ? emp.name : '', `تم حذف الموظف ${emp ? emp.name : ''}`);
+        saveDB();
+    }
 }
 
 function resetEmpForm() {
@@ -3416,22 +3523,22 @@ function printEmployeesTable() {
     // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -3442,9 +3549,9 @@ function printEmployeesTable() {
                 </tr>
             </table>
         </div>`;
-        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+    const finalHtmlWithFooter = finalHtml + footerNewHtml;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -3527,6 +3634,7 @@ function saveBranch() {
     document.getElementById('branchNumber').value = '';
     document.getElementById('branchName').value = '';
     document.getElementById('branchAddress').value = '';
+    logActivity(id ? 'تعديل' : 'إضافة', 'فرع', id || ('b' + Date.now()), name, id ? `تم تعديل الفرع ${name}` : `تم إضافة فرع جديد ${name}`);
     saveDB();
 }
 
@@ -3541,7 +3649,12 @@ function editBranch(id) {
 
 function delBranch(id) {
     if (!canPerform('branches', 'delete')) return alert('ليس لديك صلاحية لحذف الفروع');
-    if (confirm('تأكيد الحذف؟')) { db.branches = db.branches.filter(x => x.id !== id); saveDB(); }
+    if (confirm('تأكيد الحذف؟')) {
+        const branch = db.branches.find(x => x.id === id);
+        db.branches = db.branches.filter(x => x.id !== id);
+        logActivity('حذف', 'فرع', id, branch ? branch.name : '', `تم حذف الفرع ${branch ? branch.name : ''}`);
+        saveDB();
+    }
 }
 
 function renderBranches() {
@@ -3605,6 +3718,8 @@ function saveUser() {
         data.password = passwordInput;
         db.users.push(data);
     }
+    const action = id ? 'تعديل' : 'إضافة';
+    logActivity(action, 'مستخدم', data.id, data.name, `${action} المستخدم ${data.name}`);
     document.getElementById('userEditId').value = '';
     document.getElementById('userName').value = '';
     document.getElementById('userPassword').value = '';
@@ -3657,18 +3772,25 @@ function showSettingsSubtab(name) {
     const generalTab = document.getElementById('settings-subtab-general');
     const holidaysTab = document.getElementById('settings-subtab-holidays');
     const shiftsTab = document.getElementById('settings-subtab-shifts');
+    const activityTab = document.getElementById('settings-subtab-activity');
     if (generalTab) generalTab.style.display = name === 'general' ? 'block' : 'none';
     if (holidaysTab) holidaysTab.style.display = name === 'holidays' ? 'block' : 'none';
     if (shiftsTab) shiftsTab.style.display = name === 'shifts' ? 'block' : 'none';
+    if (activityTab) activityTab.style.display = name === 'activity' ? 'block' : 'none';
     const generalBtn = document.getElementById('settings-tab-general-btn');
     const holidaysBtn = document.getElementById('settings-tab-holidays-btn');
     const shiftsBtn = document.getElementById('settings-tab-shifts-btn');
+    const activityBtn = document.getElementById('settings-tab-activity-btn');
     if (generalBtn) generalBtn.classList.toggle('active', name === 'general');
     if (holidaysBtn) holidaysBtn.classList.toggle('active', name === 'holidays');
     if (shiftsBtn) shiftsBtn.classList.toggle('active', name === 'shifts');
+    if (activityBtn) activityBtn.classList.toggle('active', name === 'activity');
     if (name === 'shifts') {
         renderWorkShifts();
         renderShiftPeriods();
+    }
+    if (name === 'activity') {
+        renderActivityLog();
     }
 }
 
@@ -3684,8 +3806,11 @@ function saveHoliday() {
     if (id) {
         const h = db.holidays.find(x => x.id === id);
         h.name = name; h.date = date;
+        logActivity('تعديل', 'مناسبة', id, name, `تم تعديل المناسبة ${name}`);
     } else {
-        db.holidays.push({ id: 'h' + Date.now(), name, date });
+        const holidayId = 'h' + Date.now();
+        db.holidays.push({ id: holidayId, name, date });
+        logActivity('إضافة', 'مناسبة', holidayId, name, `تم إضافة المناسبة ${name}`);
     }
     resetHolidayForm();
     saveDB();
@@ -3734,9 +3859,11 @@ function saveShift() {
     if (id) {
         const shift = db.workShifts.find(s => s.id === id);
         if (shift) shift.name = name;
+        logActivity('تعديل', 'دوام', id, name, `تم تعديل الدوام ${name}`);
     } else {
         savedShiftId = 's' + Date.now();
         db.workShifts.push({ id: savedShiftId, name, periods: [] });
+        logActivity('إضافة', 'دوام', savedShiftId, name, `تم إضافة دوام جديد ${name}`);
     }
     resetShiftForm();
     saveDB();
@@ -4021,6 +4148,9 @@ function saveDailyEntry() {
     } else {
         db.dailyFollowUps.push(entry);
     }
+    const action = id ? 'تعديل' : 'إضافة';
+    const employeeName = emp ? emp.name : '';
+    logActivity(action, 'تعقيب يومي', entry.id, `${employeeName} - ${date}`, `${action} تعقيب يومي للموظف ${employeeName} بتاريخ ${date}`);
     resetDailyForm();
     saveDB();
 }
@@ -4042,7 +4172,9 @@ function resetDailyForm() {
 function deleteDailyEntry(id) {
     if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف سجلات التعقيب اليومي');
     if (!confirm('هل تريد حذف هذا السجل؟')) return;
+    const entry = db.dailyFollowUps.find(x => x.id === id);
     db.dailyFollowUps = db.dailyFollowUps.filter(x => x.id !== id);
+    logActivity('حذف', 'تعقيب يومي', id, entry ? `${getEmployeeLabel(entry.empId)} - ${entry.date}` : '', `تم حذف تعقيب يومي${entry ? ` للموظف ${getEmployeeLabel(entry.empId)} بتاريخ ${entry.date}` : ''}`);
     saveDB();
 }
 
@@ -4105,6 +4237,7 @@ function saveDailyExtra() {
     } else {
         db.dailyExtras.push(entry);
     }
+    logActivity(id ? 'تعديل' : 'إضافة', 'إضافي', entry.id, `${getEmployeeLabel(empId)} - ${date}`, `${id ? 'تم تعديل' : 'تم إضافة'} إضافي للموظف ${getEmployeeLabel(empId)} بتاريخ ${date}`);
     resetDailyExtraForm();
     saveDB();
 }
@@ -4134,7 +4267,9 @@ function resetDailyExtraForm() {
 function deleteDailyExtra(id) {
     if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف الإضافي');
     if (!confirm('هل تريد حذف هذا الإضافي؟')) return;
+    const entry = db.dailyExtras.find(x => x.id === id);
     db.dailyExtras = db.dailyExtras.filter(x => x.id !== id);
+    logActivity('حذف', 'إضافي', id, entry ? `${getEmployeeLabel(entry.empId)} - ${entry.date}` : '', `تم حذف إضافي${entry ? ` للموظف ${getEmployeeLabel(entry.empId)} بتاريخ ${entry.date}` : ''}`);
     saveDB();
 }
 
@@ -4201,6 +4336,7 @@ async function saveDailyAdvance() {
         db.dailyAdvances = db.dailyAdvances || [];
         db.dailyAdvances.push(entry);
     }
+    logActivity(id ? 'تعديل' : 'إضافة', 'سلفة', entry.id, `${getEmployeeLabel(empId)} - ${date}`, `${id ? 'تم تعديل' : 'تم إضافة'} سلفة للموظف ${getEmployeeLabel(empId)} بتاريخ ${date}`);
     const saveButton = document.getElementById('btnSaveAdvance');
     const originalText = saveButton ? saveButton.innerText : '';
     if (saveButton) {
@@ -4240,7 +4376,9 @@ function resetDailyAdvanceForm() {
 async function deleteDailyAdvance(id) {
     if (!canPerform('daily', 'delete')) return alert('ليس لديك صلاحية لحذف السلفة');
     if (!confirm('هل تريد حذف هذه السلفة؟')) return;
+    const entry = (db.dailyAdvances || []).find(x => x.id === id);
     db.dailyAdvances = (db.dailyAdvances || []).filter(x => x.id !== id);
+    logActivity('حذف', 'سلفة', id, entry ? `${getEmployeeLabel(entry.empId)} - ${entry.date}` : '', `تم حذف سلفة${entry ? ` للموظف ${getEmployeeLabel(entry.empId)} بتاريخ ${entry.date}` : ''}`);
     await saveDB({ waitRemote: true });
 }
 
@@ -4317,6 +4455,7 @@ async function sendDailyRecords() {
         renderSentReports();
         return;
     }
+    logActivity('إرسال', 'تعقيب مرسل', reportId, branchName, `تم إرسال ${records.length} سجل تعقيب يومي من الفرع ${branchName}`);
     renderDailyFollowups();
     renderSentReports();
 }
@@ -4704,22 +4843,22 @@ function previewSentReport(reportId) {
     // </div></td></tr></tfoot>`;
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -4731,7 +4870,7 @@ function previewSentReport(reportId) {
             </table>
         </div>`;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -4963,6 +5102,7 @@ function transferDailyRecords() {
 
     db.dailyFollowUps = db.dailyFollowUps.filter(item => !records.includes(item));
     saveDB();
+    logActivity('أرشفة', 'أرشفة', reportId, branchName, `تم ترحيل ${records.length} سجل تعقيب يومي من الفرع ${branchName}`);
     alert('تم ترحيل التعقيب وإنشاء ملف PDF للأرشفة.');
 }
 
@@ -5374,22 +5514,22 @@ function printDailyTable() {
     // const finalHtmlWithFooter = finalHtml.replace('</table>', printFooter + '</table>');
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -5400,9 +5540,9 @@ function printDailyTable() {
                 </tr>
             </table>
         </div>`;
-        const finalHtmlWithFooter = finalHtml + footerNewHtml;
+    const finalHtmlWithFooter = finalHtml + footerNewHtml;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -5611,22 +5751,22 @@ function previewArchivedReport(reportId) {
     // </div></td></tr></tfoot>`;
 
     // const printContent = `<!DOCTYPE html>
-            // ==================== تعديل الفوتر ====================
-        // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
-        // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
-        /*
-        const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
-            <span class="signature">رئيس قسم الموارد البشرية</span>
-            <span class="signature">رئيس قسم الحسابات</span>
-            <span class="signature">المراجعة</span>
-            <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
-        </div></td></tr></tfoot>`;
-        const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
-        */
-        
-        // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
-        // الفوتر في صف واحد بأربعة أعمدة.
-        const footerNewHtml = `
+    // ==================== تعديل الفوتر ====================
+    // الكود القديم (معطل): كان يضيف الفوتر داخل <tfoot> مما يسبب تكراره في كل صفحة.
+    // يمكنك إعادة تفعيله بإلغاء تعليق الأسطر أدناه وتعليق الأسطر الجديدة.
+    /*
+    const footerHtml = `<tfoot class="print-footer-row"><tr><td colspan="${colCount}"><div class="print-footer">
+        <span class="signature">رئيس قسم الموارد البشرية</span>
+        <span class="signature">رئيس قسم الحسابات</span>
+        <span class="signature">المراجعة</span>
+        <span class="signature">نائب المدير العام للشؤون المالية والإدارية</span>
+    </div></td></tr></tfoot>`;
+    const finalHtmlWithFooter = finalHtml.replace('</table>', footerHtml + '</table>');
+    */
+
+    // الكود الجديد: الفوتر خارج الجدول (بعد </table>) بحيث يظهر مرة واحدة فقط في آخر صفحة.
+    // الفوتر في صف واحد بأربعة أعمدة.
+    const footerNewHtml = `
         <div class="print-footer-new" style="width:100%;margin-top:10px;page-break-inside:avoid;">
             <table style="width:100%;border-collapse:collapse;font-size:${fontSize};">
               <tr style="height: 80px; vertical-align: top;">
@@ -5638,7 +5778,7 @@ function previewArchivedReport(reportId) {
             </table>
         </div>`;
 
-        const printContent = `<!DOCTYPE html>
+    const printContent = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -5772,12 +5912,14 @@ function registerStatus(empId) {
 // ========== Settings & UI ==========
 function saveSettings() {
     if (!canPerform('settings', 'edit') && !canPerform('settings', 'add')) return alert('ليس لديك صلاحية لحفظ الإعدادات');
+    const oldSettings = JSON.stringify(db.settings);
     db.settings.companyName = document.getElementById('settingsCompanyName').value;
     db.settings.logo = document.getElementById('settingsLogo').value;
     db.settings.operationalDayStart = document.getElementById('settingsOperationalDayStart').value || '06:00';
     db.settings.weeklyOffDays = Array.from(document.querySelectorAll('#settingsWeeklyOff input[type=checkbox]:checked')).map(input => input.value);
     if (!db.settings.weeklyOffDays.length) db.settings.weeklyOffDays = ['5'];
     saveDB();
+    logActivity('تعديل', 'إعدادات', 'settings', db.settings.companyName, `تم تعديل إعدادات التطبيق`);
     document.getElementById('weeklyOffSaveMessage').style.display = 'block';
     setTimeout(() => { document.getElementById('weeklyOffSaveMessage').style.display = 'none'; }, 2000);
 }
@@ -5882,6 +6024,7 @@ function switchTab(tabId) {
             renderHolidays();
             renderWorkShifts();
             renderShiftPeriods();
+            renderActivityLog();
             break;
     }
 }
@@ -6058,6 +6201,110 @@ async function bootApp() {
         localStorage.removeItem('appCurrentUserId');
         showLogin('تم فتح النظام بدون الاتصال بالحالة البعيدة. يمكنك تسجيل الدخول والمتابعة.');
     }
+}
+
+// ========== سجل المحفوظات (عرض النشاطات) ==========
+// تعديل جديد: دالة عرض سجل المحفوظات مع الفلاتر
+function renderActivityLog() {
+    const tbody = document.getElementById('activityLogTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const actionFilter = document.getElementById('activityFilterAction')?.value || 'all';
+    const targetFilter = document.getElementById('activityFilterTarget')?.value || 'all';
+    const userFilter = document.getElementById('activityFilterUser')?.value || 'all';
+    const from = document.getElementById('activityFilterFrom')?.value || '';
+    const to = document.getElementById('activityFilterTo')?.value || '';
+
+    // تعبئة قائمة المستخدمين في الفلتر
+    const userSelect = document.getElementById('activityFilterUser');
+    if (userSelect) {
+        const savedVal = userSelect.value;
+        userSelect.innerHTML = '<option value="all">الكل</option>';
+        const uniqueUsers = {};
+        (db.users || []).forEach(user => {
+            if (user.id && !uniqueUsers[user.id]) {
+                uniqueUsers[user.id] = user.name || user.id;
+                userSelect.innerHTML += `<option value="${user.id}">${uniqueUsers[user.id]}</option>`;
+            }
+        });
+        (db.activityLogs || []).forEach(log => {
+            const userId = log.user || '';
+            const userName = log.userName || '';
+            if (userId && !uniqueUsers[userId]) {
+                uniqueUsers[userId] = userName || userId;
+                userSelect.innerHTML += `<option value="${userId}">${uniqueUsers[userId]}</option>`;
+            }
+        });
+        if (currentUser && currentUser.id && !uniqueUsers[currentUser.id]) {
+            uniqueUsers[currentUser.id] = currentUser.name || currentUser.id;
+            userSelect.innerHTML += `<option value="${currentUser.id}">${uniqueUsers[currentUser.id]}</option>`;
+        }
+        userSelect.value = savedVal && userSelect.querySelector(`option[value="${savedVal}"]`) ? savedVal : 'all';
+    }
+
+    const filtered = (db.activityLogs || []).filter(log => {
+        if (actionFilter !== 'all' && log.action !== actionFilter) return false;
+        if (targetFilter !== 'all' && log.targetType !== targetFilter) return false;
+        if (userFilter !== 'all' && log.user !== userFilter) return false;
+        if (from && log.timestamp && log.timestamp.slice(0, 10) < from) return false;
+        if (to && log.timestamp && log.timestamp.slice(0, 10) > to) return false;
+        return true;
+    });
+
+    // ترتيب تنازلي حسب التاريخ (الأحدث أولاً)
+    filtered.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;">لا توجد نشاطات مسجلة</td></tr>';
+        return;
+    }
+
+    filtered.forEach((log, idx) => {
+        const rowNum = idx + 1;
+        const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleString('ar-EG') : '-';
+        const actionColors = {
+            'إضافة': 'color:green;',
+            'تعديل': 'color:#e67e22;',
+            'حذف': 'color:red;'
+        };
+        const actionStyle = actionColors[log.action] || '';
+        tbody.innerHTML += `
+            <tr>
+                <td style="font-weight:bold;">${rowNum}</td>
+                <td style="font-size:12px;">${dateStr}</td>
+                <td>${log.userName || '-'}</td>
+                <td style="${actionStyle}font-weight:bold;">${log.action || '-'}</td>
+                <td>${log.targetType || '-'}</td>
+                <td>${log.targetName || '-'}</td>
+                <td style="font-size:12px;color:#666;">${log.details || '-'}</td>
+            </tr>`;
+    });
+}
+
+// تعديل جديد: إعادة ضبط فلاتر سجل المحفوظات
+function clearActivityFilters() {
+    const today = new Date();
+    const lastMonth = new Date(today);
+    lastMonth.setMonth(today.getMonth() - 1);
+    const fromEl = document.getElementById('activityFilterFrom');
+    const toEl = document.getElementById('activityFilterTo');
+    if (fromEl) fromEl.value = lastMonth.toISOString().split('T')[0];
+    if (toEl) toEl.value = today.toISOString().split('T')[0];
+    document.getElementById('activityFilterAction').value = 'all';
+    document.getElementById('activityFilterTarget').value = 'all';
+    document.getElementById('activityFilterUser').value = 'all';
+    renderActivityLog();
+}
+
+// تعديل جديد: مسح سجل المحفوظات بالكامل
+function clearActivityLog() {
+    if (!confirm('⚠️ هل أنت متأكد من مسح سجل المحفوظات بالكامل؟\nلا يمكن التراجع عن هذا الإجراء.')) return;
+    if (!confirm('تأكيد نهائي: سيتم حذف جميع سجلات النشاطات بشكل دائم.')) return;
+    db.activityLogs = [];
+    saveDB();
+    renderActivityLog();
+    alert('✅ تم مسح سجل المحفوظات بنجاح.');
 }
 
 // ========== ميزة إظهار/إخفاء الأعمدة في الجداول ==========

@@ -71,6 +71,8 @@ def default_state():
 		# تعديل جديد: حفظ السلف اليومية ضمن حالة التطبيق.
 		# الكود الأصلي لم يكن يحتوي على قائمة dailyAdvances.
 		"dailyAdvances": [],
+		# تعديل جديد: سجل المحفوظات (نشاطات المستخدمين)
+		"activityLogs": [],
 		"archivedReports": [],
 		"sentReports": [],
 		"holidays": [],
@@ -179,6 +181,8 @@ def _normalize_state(state):
 		# تعديل جديد: قبول قائمة السلف عند حفظ/تحميل حالة التطبيق.
 		# الكود الأصلي معطل: لم تكن dailyAdvances ضمن القوائم المحفوظة.
 		"dailyAdvances",
+		# تعديل جديد: قبول سجل المحفوظات عند حفظ/تحميل حالة التطبيق
+		"activityLogs",
 		"archivedReports",
 		"holidays",
 		"sentReports",
@@ -576,7 +580,7 @@ def save_state(state=None):
 		):
 			state["users"] = current_users
 		if user.get("role") != "admin":
-			for shared_key in ("sentReports", "archivedReports", "absences"):
+			for shared_key in ("sentReports", "archivedReports", "absences", "activityLogs"):
 				_merge_missing_records(current_state, state, shared_key)
 
 	return _save_state(state)
